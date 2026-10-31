@@ -4,42 +4,56 @@
 
 ![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg) ![version](https://img.shields.io/badge/version-0.1.0-blue.svg)
 
-**Verify and export the references your AI conversation already cited** — BibTeX/RIS, with annotations anchored to the sentences that produced them.
-
-A plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH), the agent runtime whose models answer with citations in hand.
+A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin. It reads a conversation, collects the papers that conversation cited, checks each paper against Crossref, OpenAlex, arXiv and DataCite, and exports the confirmed entries as BibTeX or RIS. Papers that fail the check go into a separate quarantine file instead of the library.
 
 ![The capture panel above the composer](docs/images/panel-en.png)
 
-## The twenty-turn problem
+## What it does
 
-You spent an afternoon with the agent on a literature review. It cited fifteen papers — some as DOIs in a tool result, some as full APA lines in a summary, one by name two turns back. Now you have to write.
+- **Collects citations.** Scope can be one turn, the last N turns, or the whole session. It recognises DOIs, arXiv ids, ISBNs and report numbers, and also reference lines written in APA, GB/T 7714 or IEEE style.
+- **Checks them against registries.** An entry is accepted only if the title matches, the year is within one year, the first author matches, and at least one registry returned a record.
+- **Writes annotations.** After a capture, the model already running the session writes four short fields per entry: a summary, why the paper is relevant here, a supporting quote, and caveats. A quote that does not appear in the conversation is dropped.
+- **Exports.** BibTeX, RIS, or both. The export can cover the last capture, the entries you ticked, or the whole library.
 
-You can scroll back and copy them by hand, hoping you catch the one that scrolled past. Or you can ask the model for "a `.bib` of everything we cited" and find out, at submission time, that it invented two DOIs, a page range and an author order.
+## Why not just copy the citations by hand
 
-`dsh-refkeeper` takes the third path: it pulls the citations out of the transcript you point at, checks each one against four registries, and exports only what survives — with the model's notes attached, and with any quoted evidence re-checked against the conversation.
+For three papers, copy by hand. Past that it is slow and easy to get wrong: one DOI sits in a tool result, an APA line sits in a summary, another paper is only mentioned by name two turns earlier.
 
-## Quick start
+Asking the model for a `.bib` file is faster, but models make up page ranges, DOIs and author order, and the mistake is usually found at submission time.
 
-Install it from the repository — in DSH open **Settings → Plugins**, add the GitHub spec
-`github:ymwang92/dsh-refkeeper`, and turn the plugin on for your profile.
+| | Copy by hand | Ask a model for a `.bib` | This plugin |
+| --- | --- | --- | --- |
+| Source of the list | your reading | the model's memory | parsed from the conversation you select |
+| Metadata checked | no | no | Crossref, OpenAlex, arXiv, DataCite |
+| What happens to a paper that cannot be confirmed | n/a | kept | moved to `refs/quarantine.json`, excluded from export |
+| Invented pages, DOIs, authors | n/a | possible | fields come from registry records; unsupported fields stay empty |
+| Why the paper is there | lost | lost | annotation plus a verbatim quote |
+| Same export twice | n/a | unlikely | identical bytes; entries sorted, citekeys stable |
+| Citations you never used | not included | included | excluded by default: tool output is not treated as a citation |
 
-Then, in the conversation that cited the papers:
+## Install
 
-1. Pick a scope in the panel — this turn, the last N turns, or the whole session.
-2. **Capture & save.** Candidates are verified and stored; failures go to the ⚠ area instead of the library.
-3. Untick anything you do not want, choose BibTeX / RIS.
-4. **Export this capture** → `refs/exports/` inside the session workspace, or a folder you set once.
+In DSH open **Settings → Plugins**, add the GitHub spec `github:ymwang92/dsh-refkeeper`, enable it for the current profile, and reload. The repository ships the built `lib/`, so no build step is needed. An npm package is planned; until then the Git install is the supported route.
 
-The same flow from the keyboard:
+## Use
+
+1. Open a conversation that cited papers and open the capture panel above the composer.
+2. Choose the scope, then **Capture & save**.
+3. The panel lists what was saved and what went to the ⚠ quarantine. Untick any entry you do not want.
+4. Choose BibTeX and/or RIS, then **Export this capture**.
+
+The same steps as commands:
 
 ```text
 /refs capture --scope=all --save
 /refs export --format=both
 ```
 
-## What you get
+Files are written to `refs/` inside the session's workspace. To export into a specific folder, paste its path in the panel once; it is remembered in `refs/settings.json`. Folders outside the session workspace are refused, because the host only allows writes inside it.
 
-`refs/annotated.md` — the human-readable view, written next to the JSON:
+## What the output looks like
+
+`refs/annotated.md` is the reading copy:
 
 ```markdown
 ### Physiographically sensitive mapping of temperature and precipitation across the conterminous United States
@@ -52,7 +66,7 @@ The same flow from the keyboard:
 > **Evidence** — "we use the PRISM 800 m normals (Daly et al., 2008) as the baseline for the downscaling."
 ```
 
-and the matching export:
+and the matching BibTeX entry:
 
 ```bibtex
 @article{daly2008physiographically,
@@ -70,85 +84,63 @@ and the matching export:
 }
 ```
 
-Volume, issue, pages, publisher and language are filled from the registry record when the citation in the conversation did not carry them. Fields the conversation does not support stay out of the file entirely — no `note` reading "no citation sentence available", no invented page range.
+If the citation in the conversation lacked volume, issue, pages, publisher or language, those come from the registry record. Fields that neither the conversation nor a registry supports are left out of the file entirely.
 
-## Four things it does
-
-1. **Capture.** The current turn, the previous N turns, or the whole session. Candidates come from identifiers (DOI, arXiv id, ISBN, report number) and from parsed reference lines in APA, GB/T 7714 and IEEE shapes. Tool output is skipped by default — a web search echoes a dozen DOIs nobody cited, and they bury the two that were; `--include-tools` opts back in.
-2. **Verify.** Crossref, OpenAlex, arXiv and DataCite are queried in parallel. An entry enters the main library only when all three gates pass *and* at least one registry answered.
-3. **Annotate.** After a capture, the profile's default model writes `summary`, `relevance`, `evidence` and `caveats` for each entry, grounded in the transcript lines that cite it. `evidence` is checked verbatim: a quote that is not in the conversation is dropped. No model, or no excerpt in range? The entry stays bibliographic and the capture result says why.
-4. **Export.** BibTeX and/or RIS, for the last capture, the rows you ticked, or the whole library. Deterministic output, so a diff on the `.bib` shows what actually changed.
-
-## How it compares
-
-| | Re-reading the transcript | "Give me a `.bib`" | `dsh-refkeeper` |
-| --- | --- | --- | --- |
-| Where references come from | your eyes, one scroll at a time | the model's memory | parsed from the transcript you point at |
-| Metadata checked against a registry | — | no | Crossref · OpenAlex · arXiv · DataCite |
-| Invented pages, DOIs, authors | — | happens, and you find out late | fields come from registry records; unsupported fields stay empty |
-| Why the paper is in the manuscript | lost | lost | annotation + verbatim evidence quote |
-| Reproducible, diffable export | — | no | sorted, byte-stable BibTeX/RIS |
-| Citations you never used | — | included | excluded: tool output is not a citation |
-
-## How it works
+## How a paper is accepted or rejected
 
 ```text
 conversation text
-   │  identifiers (DOI · arXiv · ISBN · report no.)
-   │  reference lines (APA · GB/T 7714 · IEEE)
+   │  identifiers: DOI, arXiv id, ISBN, report number
+   │  reference lines: APA, GB/T 7714, IEEE
    ▼
-candidates ──► Crossref · OpenAlex · arXiv · DataCite (parallel)
+candidates ──► Crossref, OpenAlex, arXiv, DataCite (queried in parallel)
    │
-   ├─ three gates: title strongly matches · year within ±1 · first author matches
-   │               and at least one registry returned a record
-   ├─ pass ──► refs/refs.json        (verified)
-   └─ fail ──► refs/quarantine.json  (⚠ kept, visible, excluded from export)
+   ├─ accepted when: title matches · year within ±1 · first author matches
+   │                 and at least one registry returned a record
+   ├─ accepted ──► refs/refs.json        (verified)
+   └─ rejected ──► refs/quarantine.json  (⚠, kept and visible, not exported by default)
 ```
 
-## Why it is built this way
+`unverified` is a third status, used when the registries could not be reached. The entry stays in the library and can be retried later; a network failure is not evidence that a citation is wrong. `quarantined` means the registries answered and disagreed.
 
-**Three gates, one vote of confidence.** No single fuzzy score decides. The title must match strongly, the year must be within ±1, and the first author must match — and at least one registry has to have answered. Latin titles are compared with Jaccard over folded tokens; CJK titles with character-bigram Dice ≥ 0.90, because Romanised registry records otherwise never match a Chinese title.
+## Annotations
 
-**`unverified` is not `quarantined`.** If the registries cannot be reached, the entry is marked `unverified` and kept — a network being down says nothing about whether the citation is real, and it can be retried. `quarantined` means the registries answered and disagreed. Collapsing the two would either throw away good references or launder bad ones.
+Four fields: `summary`, `relevance`, `evidence`, `caveats`. They are written after a capture by the profile's default model, from the conversation lines that mention the paper. A prompt rule and a parser filter both reject sentences that describe the absence of information ("the excerpt does not mention this work"); such a field is stored as empty and omitted from the export, so BibTeX gets no empty `note` and RIS gets no empty `N1`.
 
-**Empty means empty.** Every annotation field passes a filter that rejects sentences about the absence of evidence ("the excerpt does not mention this work"). Those are not content, and in a `.bib` they read as if they were. The same filter applies at render time, so libraries written before it existed are cleaned without a re-capture.
-
-**Exports are byte-stable.** Entries are sorted (author, year, title) and citekeys are disambiguated deterministically, so exporting the same library twice produces identical bytes.
-
-**Writes are atomic and locked.** `refs/*.json` goes through a temporary file + rename, guarded by an on-disk lock whose stale copies are reclaimed atomically (inode + content identity, not the path alone), so two sessions capturing at once cannot half-write the library.
+The model call happens once per capture, with a 60 second cap, and covers at most 12 entries. Entries beyond that budget, or captures without a reachable model, keep their bibliographic fields and the capture result says why annotations were skipped. The `ref_save` tool still accepts annotations you write yourself, and existing user annotations are never overwritten.
 
 ## Chinese references
 
-GB/T 7714 reference lines are parsed alongside APA and IEEE, and CJK titles are matched against registry records with character-bigram similarity rather than token overlap — the only way a Chinese title matches a romanised record. Mixed Chinese/English manuscripts work; `language` is carried into both export formats.
+GB/T 7714 reference lines are parsed along with APA and IEEE. Chinese titles are matched against registry records by character bigrams (Dice ≥ 0.90) rather than word tokens, because romanised records otherwise never match. `language` is carried into both export formats.
 
-The honest limit: open registries hold sparse metadata for Chinese journals, and CNKI / Wanfang / CQVIP are recognised as scholarly link sources when harvesting identifiers, not queried as registries. Expect more manual correction there than for an English DOI.
+Registry coverage for Chinese journals is thin: CNKI, Wanfang and CQVIP links are only used to extract identifiers, not queried as registries. Expect more manual correction there than for a paper with an English DOI.
 
 ## The panel
 
 | Control | What it does |
 | --- | --- |
-| Scope | this turn · previous N turns · whole session |
-| Capture & save | captures, verifies, annotates, stores; the result lists what was saved and what went to ⚠ |
-| Row checkbox | which entries the next export includes (saved rows tick by default, ⚠ rows do not) |
+| Scope | this turn, the last N turns, or the whole session |
+| Capture & save | captures, verifies, annotates and stores; the result lists what was saved and what went to the quarantine |
+| Row checkbox | which entries the next export includes; saved rows are ticked, ⚠ rows are not |
 | Expand a row | shows the stored fields; edits are saved per entry |
 | Format | BibTeX, RIS, or both |
-| Folder | export destination; unset means `refs/exports/` inside the session workspace |
+| Folder | export destination; empty means `refs/exports/` |
 | Export this capture | writes the ticked entries |
 | Export all references | writes the whole library |
 
 ## Commands
 
-| I want to… | Command |
+| Task | Command |
 | --- | --- |
-| see what the conversation cites, without writing anything | `/refs capture --scope=all --dry-run` |
-| capture and store | `/refs capture --scope=lastN --turns=5 --save` |
-| check one reference | `/refs verify --doi=10.1002/joc.1688` |
-| read the library | `/refs list [--quarantine]` |
-| fill missing volume/pages/publisher | `/refs enrich [--quarantine]` |
-| fix a field | `/refs edit --id=<id> --payload=<base64url(json)>` |
-| remove entries | `/refs remove <id\|doi\|arxiv>...` · `/refs remove --all --yes` |
-| export | `/refs export [--format=bibtex\|ris\|both] [--all] [--ids=…] [--out=path]` |
-| set the export folder once | `/refs dir --set=<base64url(path)>` · `/refs dir --clear` |
+| Preview what the conversation cites | `/refs capture --scope=all --dry-run` |
+| Capture and store | `/refs capture --scope=lastN --turns=5 --save` |
+| Check one reference | `/refs verify --doi=10.1002/joc.1688` |
+| Read the library | `/refs list [--quarantine]` |
+| Fill in missing volume, pages, publisher | `/refs enrich [--quarantine]` |
+| Edit one field | `/refs edit --id=<id> --payload=<base64url(json)>` |
+| Remove entries | `/refs remove <id\|doi\|arxiv>...` or `/refs remove --all --yes` |
+| Export | `/refs export [--format=bibtex\|ris\|both] [--all] [--ids=...] [--out=path]` |
+| Set the export folder | `/refs dir --set=<base64url(path)>` or `/refs dir --clear` |
 
 <details>
 <summary>Full command reference</summary>
@@ -156,8 +148,8 @@ The honest limit: open registries hold sparse metadata for Chinese journals, and
 ```text
 /refs                                                     capture readiness
 /refs capture [--scope=turn|lastN|all] [--turns=N] [--save] [--dry-run] [--include-tools]
-/refs verify --doi=… | --arxiv=… | --title=… [--json]
-/refs save --json='{…}'
+/refs verify --doi=... | --arxiv=... | --title=... [--json]
+/refs save --json='{...}'
 /refs list [--limit=N] [--quarantine]
 /refs edit --id=<id> --payload=<base64url(json)>
 /refs enrich [--quarantine]
@@ -168,9 +160,9 @@ The honest limit: open registries hold sparse metadata for Chinese journals, and
 /refs dir [--set=<base64url(path)>|--clear]
 ```
 
-`/refs capture` without `--save` only previews candidates. Export defaults to the
-last saved capture; `--all` exports the library instead. Long IDs travel
-base64url-encoded because real ones contain spaces, `<>`, `;` and parentheses.
+Without `--save`, `/refs capture` only previews candidates. Export defaults to the
+last saved capture; `--all` exports the library instead. Long identifiers are
+passed base64url-encoded because real ids contain spaces, `<>`, `;` and parentheses.
 
 </details>
 
@@ -178,51 +170,38 @@ base64url-encoded because real ones contain spaces, `<>`, `;` and parentheses.
 
 | Tool | Purpose |
 | --- | --- |
-| `ref_capture` | pull candidate references out of the conversation |
+| `ref_capture` | collect candidate references from the conversation |
 | `ref_verify` | check one identifier or title against the registries |
-| `ref_save` | store a reference with annotations you supply yourself |
+| `ref_save` | store a reference with annotations you supply |
 | `ref_export` | write BibTeX/RIS for a batch, a selection, or the library |
-| `ref_ping` | report which host seams and registries are reachable |
+| `ref_ping` | report which host services and registries are reachable |
 
 ## Files
 
 ```text
-refs/refs.json          verified references, with their annotations
-refs/quarantine.json    ⚠ entries that failed a gate
-refs/last-capture.json  what the last capture produced, and the default export scope
-refs/settings.json      the remembered export folder
-refs/annotated.md       the human-readable view: record, verdict, annotations
+refs/refs.json          accepted references, with their annotations
+refs/quarantine.json    ⚠ entries that failed the check
+refs/last-capture.json  result of the last capture; default export scope
+refs/settings.json      remembered export folder
+refs/annotated.md       reading copy: record, verdict, annotations
 refs/exports/           default export destination
 ```
 
-Plain JSON and Markdown: commit them with the manuscript, diff them, back them up.
-
-## Data and privacy
-
-- Outbound traffic is the identifier or title being verified, sent to Crossref, OpenAlex, arXiv and DataCite. Nothing else leaves the machine.
-- Annotations are generated by the model already running this session — no extra account, no API key of the plugin's own.
-- No telemetry. The library is a local JSON file.
+All plain JSON and Markdown, so they can be committed with the manuscript and diffed.
 
 ## Limits
 
-- **Not a Zotero replacement.** Zotero is the right tool for a personal library across years: PDFs, styles, sync, a browser connector. This plugin covers one manuscript's citations, the ones a conversation already wrote down.
-- No PDF reading; everything comes from the conversation text and the registries.
-- Exports only write inside the session's workspace: the host applies the `workspace-write` sandbox, so an outside folder is refused with a message rather than half-written.
-- Annotating a capture costs one model call (60 s cap). A long session can hit the 12-entry per-capture annotation budget; the rest stay bibliographic.
+- It is not a replacement for Zotero. Zotero handles a personal library across years (PDFs, styles, sync). This plugin covers the citations in one manuscript, as they appear in a conversation.
+- It does not read PDFs. Everything comes from the conversation text and the registries.
+- Exports are limited to the session workspace by the host's sandbox.
+- A capture spends one model call (60 second cap) and annotates at most 12 entries.
+- Registry metadata for Chinese journals is sparse; see above.
 
-## Install
+## Data and privacy
 
-The repository ships its built `lib/`, so a Git install is enough: **Settings → Plugins**,
-add `github:ymwang92/dsh-refkeeper`, enable it for the current profile.
-
-The npm package is the next release step; once it is published, installing by package name
-becomes the shorter path.
-
-## Roadmap
-
-- `v0.1.x` — npm release, `awesome-dsh-plugin` listing, tag your first export.
-- `v0.2` — CNKI / Wanfang parsing beyond link harvesting, GB/T 7714 output, annotation editing from the panel.
-- Later — a Zotero import/export bridge, so this is a capture step, not a silo.
+- Requests leave the machine only for verification: the identifier or title is sent to Crossref, OpenAlex, arXiv and DataCite.
+- Annotations use the model already configured in the session; the plugin holds no API key of its own.
+- No telemetry. The library is a local file.
 
 ## Development
 
@@ -230,10 +209,10 @@ becomes the shorter path.
 npm ci
 npm test          # vitest
 npm run typecheck
-npm run build     # tsdown (host) + client bundle
+npm run build     # tsdown for the host bundle, then the client bundle
 ```
 
-`tsdown` clears `lib/`, so run the client bundle after it. Tests run on Node 22+.
+`tsdown` clears `lib/`, so run the client bundle afterwards. Node 22 or newer.
 
 ## License
 
