@@ -196,7 +196,7 @@ export async function runRefsCommand(
       records === undefined
         ? 'read seam: sessionQuery unavailable on this host (capture will report readMode=none)'
         : `read seam: sessionQuery · ${String(records.length)} events · ${String(turnCount)} turn(s)`,
-      'storage: not implemented (M3) · verification: /refs verify (Crossref, OpenAlex, arXiv, DataCite)',
+      'storage: refs/refs.json (verified) + refs/quarantine.json (⚠) · verification: /refs verify (Crossref, OpenAlex, arXiv, DataCite)',
       REFS_USAGE,
     ]
     return { kind: 'success', text: lines.join('\n') }

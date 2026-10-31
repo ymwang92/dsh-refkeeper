@@ -678,7 +678,7 @@ export const refExportTool = defineTool({
 export const refCaptureTool = defineTool({
   name: 'ref_capture',
   description:
-    'Capture a bibliographic reference from the current conversation. Pass the fields you can ground in the conversation (title, authors, year, DOI, arXiv id, ISBN, report number, container, pages); fields you omit are left for regex extraction and later verification. With scope="turn"|"lastN"|"all" the result is merged with every reference found in that conversation window. Nothing is persisted in M1: the result is a candidate preview that M2 verifies and M3 stores.',
+    'Capture a bibliographic reference from the current conversation. Pass the fields you can ground in the conversation (title, authors, year, DOI, arXiv id, ISBN, report number, container, pages); fields you omit are left for regex extraction and later verification. With scope="turn"|"lastN"|"all" the result is merged with every reference found in that conversation window. This tool only previews candidates; `/refs capture --save` or ref_save verifies and stores them.',
   parameters: {
     title: { type: 'string', description: 'Work title, in the language it appears in the conversation.' },
     authors: {
@@ -798,7 +798,7 @@ export const refCaptureTool = defineTool({
         chars: 0,
         truncated: false,
         candidatesJson: JSON.stringify(fromModel === undefined ? [] : [fromModel]),
-        note: 'Nothing persisted yet: candidate preview only. Feed a candidate to ref_verify, then storage/export land in M3.',
+        note: 'Nothing persisted by this tool: it previews candidates. `/refs capture --save` verifies and stores them; entries that fail verification go to refs/quarantine.json.',
       }
     }
     if (session === undefined) {
@@ -862,7 +862,7 @@ export const refCaptureTool = defineTool({
       chars: run.read.chars,
       truncated: run.read.truncated,
       candidatesJson: JSON.stringify(merged),
-      note: 'Nothing persisted (M1): candidate preview only. Model-supplied fields outrank regex guesses on merge.',
+      note: 'Nothing persisted by this tool: candidate preview only. Model-supplied fields outrank regex guesses on merge; `/refs capture --save` stores the verified ones.',
     }
   },
 })

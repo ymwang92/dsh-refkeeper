@@ -64,7 +64,7 @@ describe('runRefsCommand status', () => {
     expect(result.kind).toBe('success')
     expect(result.text).toContain('sdk 0.2.1-rc.2')
     expect(result.text).toContain('5 events · 2 turn(s)')
-    expect(result.text).toContain('storage: not implemented')
+    expect(result.text).toContain('storage: refs/refs.json (verified)')
   })
 
   it('says so instead of pretending when the seam is missing', async () => {
