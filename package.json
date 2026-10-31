@@ -1,7 +1,7 @@
 {
   "name": "dsh-refkeeper",
   "version": "0.1.0",
-  "description": "Citation and source manager for DeepSeek Harness: capture references from the conversation, annotate them, verify them against authoritative sources, and export BibTeX/RIS.",
+  "description": "Verify and export the references your AI conversation already cited: BibTeX/RIS with evidence-anchored annotations.",
   "author": "dsh-refkeeper contributors",
   "repository": {
     "type": "git",

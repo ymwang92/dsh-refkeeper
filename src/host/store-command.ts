@@ -648,7 +648,7 @@ export async function exportLibrary(
       kind: 'success',
       text: parsed.includeQuarantine
         ? 'library and quarantine are empty — nothing to export yet.'
-        : 'library is empty — nothing to export yet. Save a reference first (panel 手动添加, or the model\'s ref_save); ⚠ entries need --include-quarantine.',
+        : 'library is empty — nothing to export yet. Capture one from the conversation first (panel 捕获并保存, or the model\'s ref_save); ⚠ entries need --include-quarantine.',
     }
   }
 
