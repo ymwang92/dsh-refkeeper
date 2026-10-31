@@ -1,5 +1,7 @@
 # dsh-refkeeper
 
+**English** · [简体中文](README.zh.md)
+
 Citation and source manager for DeepSeek Harness. It captures the references a
 conversation already talks about, checks them against authoritative registries,
 and exports what survives as BibTeX or RIS.
