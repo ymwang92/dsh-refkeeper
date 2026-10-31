@@ -47,7 +47,8 @@
     "README.zh.md",
     "LICENSE",
     "screenshots.json",
-    "docs/images/panel.png"
+    "docs/images/panel.png",
+    "docs/images/panel-en.png"
   ],
   "scripts": {
     "build": "tsdown && node scripts/build-client.mjs",

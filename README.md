@@ -8,7 +8,7 @@
 them out of the transcript, checks each one against four registries, and exports
 BibTeX or RIS — carrying the agent's annotations along when there are any.
 
-![The capture panel above the composer](docs/images/panel.png)
+![The capture panel above the composer](docs/images/panel-en.png)
 
 DeepSeek Harness agents quote papers mid-answer: a DOI in a tool result, an APA
 line in a summary, a report named two turns ago. `dsh-refkeeper` collects those,
