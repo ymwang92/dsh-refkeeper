@@ -1,5 +1,6 @@
 import { renderBibtex } from './bibtex.ts'
 import { renderRis } from './ris.ts'
+import { usefulAnnotationText } from '../core/annotation-text.ts'
 import { stripMarkup } from '../core/text.ts'
 import type { StoredReference } from '../store/types.ts'
 
@@ -24,9 +25,36 @@ export const EXPORT_EXTENSIONS: Record<ExportFormat, string> = {
  * behind their back. Identifiers and URLs stay untouched: `*` is legal in a
  * quarantine id and `_` is legal in a DOI.
  */
+function cleanAnnotation(annotation: StoredReference['annotation']): StoredReference['annotation'] {
+  if (annotation === undefined) return undefined
+  const kept = {
+    summary: usefulAnnotationText(annotation.summary),
+    relevance: usefulAnnotationText(annotation.relevance),
+    evidence: usefulAnnotationText(annotation.evidence),
+    caveats: usefulAnnotationText(annotation.caveats),
+  }
+  const rows = {
+    ...(kept.summary === '' ? {} : { summary: kept.summary }),
+    ...(kept.relevance === '' ? {} : { relevance: kept.relevance }),
+    ...(kept.evidence === '' ? {} : { evidence: kept.evidence }),
+    ...(kept.caveats === '' ? {} : { caveats: kept.caveats }),
+  }
+  // Nothing survived: exporting an empty `note` field would just be a blank line.
+  if (Object.keys(rows).length === 0) return undefined
+  // Spread `annotation` first only for provenance: re-adding the old fields
+  // would undo the filter, because an omitted key leaves the stale one in place.
+  return {
+    ...(annotation.source === undefined ? {} : { source: annotation.source }),
+    ...(annotation.status === undefined ? {} : { status: annotation.status }),
+    ...(annotation.updatedAt === undefined ? {} : { updatedAt: annotation.updatedAt }),
+    ...rows,
+  }
+}
+
 function cleanForExport(ref: StoredReference): StoredReference {
   return {
     ...ref,
+    ...(ref.annotation === undefined ? {} : { annotation: cleanAnnotation(ref.annotation) }),
     title: stripMarkup(ref.title),
     ...(ref.containerTitle === undefined ? {} : { containerTitle: stripMarkup(ref.containerTitle) }),
     ...(ref.publisher === undefined ? {} : { publisher: stripMarkup(ref.publisher) }),

@@ -11,6 +11,8 @@ import { describeScope, parseScope } from './core/scope.ts'
 import { writeBatch } from './host/capture-batch.ts'
 import type { CaptureBatch } from './host/capture-batch.ts'
 import { fieldsOfReference, saveCaptured } from './host/capture-save.ts'
+import { annotateCaptured } from './host/annotate.ts'
+import type { AnnotationOutcome, LlmServiceLike, ModelRoute } from './host/annotate.ts'
 import type { SessionLike, SessionQueryLike } from './host/session-read.ts'
 import type { SaveSummary } from './host/refs-command.ts'
 import { collectCapture, parseRefsCommand, runRefsCommand } from './host/refs-command.ts'
@@ -168,6 +170,25 @@ let projections: ProjectionReader | undefined
 let sessionQuery: SessionQueryLike | undefined
 let directoryPickerController: DirectoryPickerControllerLike | undefined
 let hostFs: HostFsLike | undefined
+let llmService: LlmServiceLike | undefined
+let defaultModelService: DefaultModelLike | undefined
+
+/** The host's default model picker, as seen through a structural seam. */
+interface DefaultModelLike {
+  currentSelection(): unknown
+}
+
+/**
+ * `currentSelection()` returns a detached model selection whose shape belongs to
+ * the host; only provider and model matter here, and they are read defensively.
+ */
+function routeOf(selection: unknown): ModelRoute | undefined {
+  if (typeof selection !== 'object' || selection === null) return undefined
+  const raw = selection as Record<string, unknown>
+  const provider = typeof raw['provider'] === 'string' ? raw['provider'] : undefined
+  const model = typeof raw['model'] === 'string' ? raw['model'] : undefined
+  return provider === undefined || model === undefined ? undefined : { provider, model }
+}
 /**
  * Optional host services may mount after this plugin's constructor runs, so a
  * value captured at mount time can stay undefined for the whole process. Probe
@@ -945,7 +966,7 @@ export default class RefkeeperService extends Service {
                   query: sessionQuery,
                   sdkVersion: probeSdkVersion() ?? 'unknown',
                   turnStarts: outlineTurnStarts,
-                  save: async (candidates) => {
+                  save: async (candidates, context) => {
                     const summary = await saveCaptured(candidates, {
                       resolveIdentifier: async (candidate) => {
                         const outcome = await verifyCandidate(
@@ -972,13 +993,39 @@ export default class RefkeeperService extends Service {
                       },
                     })
                     if (summary.entries === undefined || summary.entries.length === 0) return summary
+                    // Annotation is the value-add; a failure here must not cost the capture.
+                    const llm = optionalService<LlmServiceLike>('llm', llmService, (value) => {
+                      llmService = value
+                    })
+                    const models = optionalService<DefaultModelLike>(
+                      'agentDefaultModel',
+                      defaultModelService,
+                      (value) => {
+                        defaultModelService = value
+                      },
+                    )
+                    let annotated = { entries: [...summary.entries], outcome: undefined as AnnotationOutcome | undefined }
+                    try {
+                      annotated = await annotateCaptured(summary.entries, {
+                        workspace: cwd,
+                        ...(llm === undefined ? {} : { llm }),
+                        selection: () => routeOf(models?.currentSelection()),
+                        lines: context.lines,
+                      })
+                    } catch {
+                      // Keep the stored bibliography; the panel just shows no annotation mark.
+                    }
                     const batch: CaptureBatch = {
                       capturedAt: new Date().toISOString(),
                       scope: scopeLabelOf(raw),
-                      entries: summary.entries,
+                      entries: annotated.entries,
                     }
                     const persisted = await writeBatch(cwd, batch)
-                    return persisted ? { ...summary, batch } : summary
+                    const base = { ...summary, entries: annotated.entries }
+                    const withBatch = persisted ? { ...base, batch } : base
+                    return annotated.outcome === undefined
+                      ? withBatch
+                      : { ...withBatch, annotations: annotated.outcome }
                   },
                 },
               )

@@ -46,6 +46,8 @@ export interface BatchEntry {
   readonly reason?: string | undefined
   /** Snapshot of the stored record's editable metadata. */
   readonly fields?: BatchFields | undefined
+  /** True when the model wrote an annotation for this entry after capture. */
+  readonly annotated?: boolean | undefined
 }
 
 export interface CaptureBatch {
@@ -117,10 +119,12 @@ function sanitizeEntry(entry: unknown): BatchEntry | undefined {
   const title = text(raw['title']) ?? ''
   const year = typeof raw['year'] === 'number' ? raw['year'] : undefined
   const fields = sanitizeFields(raw['fields'])
+  const annotated = raw['annotated'] === true
   return {
     title,
     status,
     ...(fields === undefined ? {} : { fields }),
+    ...(annotated ? { annotated: true } : {}),
     ...(id === undefined ? {} : { id }),
     ...(doi === undefined ? {} : { doi }),
     ...(arxivId === undefined ? {} : { arxivId }),

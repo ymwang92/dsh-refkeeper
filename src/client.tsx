@@ -116,6 +116,8 @@ interface Strings {
   readonly batchHeading: string
   readonly batchEmpty: string
   readonly refresh: string
+  /** Tooltip on the mark that says the model annotated this entry. */
+  readonly annotated: string
   readonly statusSaved: string
   readonly statusQuarantined: string
   readonly statusSkipped: string
@@ -188,6 +190,7 @@ const EN: Strings = {
   batchHeading: 'Last capture',
   batchEmpty: 'Nothing captured yet — the export buttons then fall back to the whole library.',
   refresh: 'Refresh list',
+  annotated: 'annotated',
   statusSaved: 'saved',
   statusQuarantined: '⚠ quarantined',
   statusSkipped: 'skipped',
@@ -260,6 +263,7 @@ const ZH: Strings = {
   batchHeading: '最近一次捕获',
   batchEmpty: '还没有捕获记录；此时导出会退回整库。',
   refresh: '刷新列表',
+  annotated: '已注解',
   statusSaved: '已入表',
   statusQuarantined: '⚠ 隔离',
   statusSkipped: '跳过',
@@ -709,6 +713,13 @@ function BatchList(props: {
               { style: { color: STATUS_TONE[entry.status], flexShrink: 0, whiteSpace: 'nowrap' } },
               statusLabel(entry, text),
             ),
+            entry.annotated === true
+              ? React.createElement(
+                  'span',
+                  { title: text.annotated, style: { flexShrink: 0, opacity: 0.65 } },
+                  '✎',
+                )
+              : null,
             React.createElement(
               'span',
               {

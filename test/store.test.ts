@@ -210,3 +210,31 @@ describe('reference identity', () => {
     expect(ref?.identifiers).toEqual({ doi: '10.1000/nested' })
   })
 })
+
+describe('annotated.md', () => {
+  it('omits annotation fields that only describe the missing evidence', async () => {
+    const filler = coerceReference(
+      {
+        title: 'Filler annotation',
+        type: 'journalArticle',
+        authors: [{ family: 'Daly', given: 'C.' }],
+        year: 2008,
+        identifiers: { doi: '10.1002/joc.1688' },
+        annotation: {
+          summary: 'A gridded climate dataset.',
+          caveats: 'The conversation excerpt does not mention or cite this reference.',
+          source: 'model',
+          status: 'complete',
+        },
+      },
+      NOW,
+    )
+    if (!filler) throw new Error('fixture did not coerce')
+    await saveReference(workspace, filler, { now: NOW })
+    const rendered = await readFile(join(workspace, 'refs', 'annotated.md'), 'utf8')
+    expect(rendered).toContain('**Summary** — A gridded climate dataset.')
+    // The caveat was pure meta-commentary, so the line is absent rather than blank.
+    expect(rendered).not.toContain('**Caveats**')
+    expect(rendered).not.toContain('does not mention')
+  })
+})

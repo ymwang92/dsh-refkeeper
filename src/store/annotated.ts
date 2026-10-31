@@ -1,3 +1,4 @@
+import { usefulAnnotationText } from '../core/annotation-text.ts'
 import { REF_TYPES } from './types.ts'
 import type { QuarantineState, RefAuthor, RefType, StoredReference, StoreState } from './types.ts'
 
@@ -50,11 +51,18 @@ function metaLine(ref: StoredReference): string {
 function annotationBlock(ref: StoredReference): string[] {
   const annotation = ref.annotation
   if (!annotation) return []
+  // Rows written before the annotator rejected meta-commentary still hold
+  // "the excerpt does not cite this work". It is dropped here, at the render
+  // boundary, so the view is clean without rewriting the user's library.
+  const summary = usefulAnnotationText(annotation.summary)
+  const relevance = usefulAnnotationText(annotation.relevance)
+  const evidence = usefulAnnotationText(annotation.evidence)
+  const caveats = usefulAnnotationText(annotation.caveats)
   const rows: string[] = []
-  if (annotation.summary) rows.push(`**Summary** — ${annotation.summary}`)
-  if (annotation.relevance) rows.push(`**Why it matters** — ${annotation.relevance}`)
-  if (annotation.evidence) rows.push(`**Evidence** — ${annotation.evidence}`)
-  if (annotation.caveats) rows.push(`**Caveats** — ${annotation.caveats}`)
+  if (summary !== '') rows.push(`**Summary** — ${summary}`)
+  if (relevance !== '') rows.push(`**Why it matters** — ${relevance}`)
+  if (evidence !== '') rows.push(`**Evidence** — ${evidence}`)
+  if (caveats !== '') rows.push(`**Caveats** — ${caveats}`)
   if (rows.length === 0) return []
   const provenance = annotation.source ? ` _(${annotation.source})_` : ''
   return ['', ...rows.map((row) => `> ${row}`), provenance ? provenance.trim() : ''].filter(

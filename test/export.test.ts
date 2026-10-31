@@ -111,6 +111,38 @@ describe('ris export', () => {
 })
 
 describe('export facade', () => {
+  it('drops annotation text that only describes the missing evidence', () => {
+    const filler = ref({
+      annotation: {
+        relevance: 'The supplied excerpt contains no statement of why this work is cited.',
+        caveats:
+          'The conversation excerpt consists only of runtime and workspace context and does not mention or cite this reference.',
+      },
+    })
+    const bib = renderExport('bibtex', [filler])
+    // No caveat survives, so BibTeX has no note field at all rather than an empty one.
+    expect(bib).not.toContain('note =')
+    expect(bib).not.toContain('runtime and workspace context')
+    const ris = renderExport('ris', [filler])
+    expect(ris).not.toContain('N1  - Caveats')
+    expect(ris).not.toContain('supplied excerpt')
+  })
+
+  it('keeps real annotation text while dropping the filler beside it', () => {
+    const mixed = ref({
+      annotation: {
+        summary: 'Thermometry at the nanoscale.',
+        relevance: 'No citation sentence is available in the given text.',
+        caveats: 'The conversation excerpt does not mention this reference.',
+      },
+    })
+    const bib = renderExport('bibtex', [mixed])
+    expect(bib).toContain('abstract = {Thermometry at the nanoscale.}')
+    expect(bib).not.toContain('No citation sentence')
+    // The summary survives but the filler caveat must not resurrect the note field.
+    expect(bib).not.toContain('note =')
+  })
+
   it('picks the requested format', () => {
     expect(renderExport('bibtex', [ref()])).toContain('@article')
     expect(renderExport('ris', [ref()])).toContain('TY  - JOUR')

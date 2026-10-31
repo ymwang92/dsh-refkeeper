@@ -2,6 +2,7 @@ import type { Candidate } from '../core/candidates.ts'
 import { extractCandidates } from '../core/candidates.ts'
 import type { BatchEntry, CaptureBatch } from './capture-batch.ts'
 import { BATCH_MARKER, encodeBatch } from './capture-batch.ts'
+import type { AnnotationOutcome, TranscriptLine } from './annotate.ts'
 import type { CaptureScope } from '../core/scope.ts'
 import { describeScope, parseScope } from '../core/scope.ts'
 import type { SessionLike, SessionQueryLike, TranscriptRead } from './session-read.ts'
@@ -21,7 +22,13 @@ export interface RefsCommandDeps {
   /** Turn seqs from the `turnOutline` projection, when the host exposes it. */
   readonly turnStarts?: ((session: SessionLike) => readonly number[] | undefined) | undefined
   /** Persist the captured candidates (`/refs capture --save`). */
-  readonly save?: ((candidates: readonly Candidate[]) => Promise<SaveSummary>) | undefined
+  readonly save?: ((candidates: readonly Candidate[], context: SaveContext) => Promise<SaveSummary>) | undefined
+}
+
+/** What `--save` knows about the conversation it captured from. */
+export interface SaveContext {
+  /** The transcript the candidates came out of: annotations are grounded on it. */
+  readonly lines: readonly TranscriptLine[]
 }
 
 /** What `--save` managed to do with the candidates it was handed. */
@@ -35,6 +42,8 @@ export interface SaveSummary {
   readonly entries?: readonly BatchEntry[] | undefined
   /** Set by the host once the batch is persisted; drives the default export scope. */
   readonly batch?: CaptureBatch | undefined
+  /** How the automatic annotation pass went, when the host attempted one. */
+  readonly annotations?: AnnotationOutcome | undefined
 }
 
 export const REFS_USAGE = [
@@ -219,7 +228,12 @@ export async function runRefsCommand(
       text: 'capture --save is unavailable on this host build; restart or update dsh-refkeeper, then retry. No references were saved.',
     }
   }
-  const summary = await deps.save(run.candidates)
+  const transcript = run.read.segments.map((segment) => ({
+    seq: segment.seq,
+    text: segment.text,
+    role: segment.role,
+  }))
+  const summary = await deps.save(run.candidates, { lines: transcript })
   const stored = summary.saved + summary.quarantined
   const lines = [
     preview,
@@ -230,6 +244,14 @@ export async function runRefsCommand(
         ? 'This capture is now the default export scope: `/refs export` writes just these entries; `/refs export --all` writes the whole library.'
         : 'Nothing was stored, so the export scope is unchanged.',
   ]
+  const outcome = summary.annotations
+  if (outcome !== undefined) {
+    lines.push(
+      outcome.reason === undefined
+        ? `annotations: ${String(outcome.annotated)} of ${String(outcome.considered)} annotated by ${outcome.model}`
+        : `annotations: skipped — ${outcome.reason}`,
+    )
+  }
   if (summary.batch !== undefined) lines.push(encodeBatch(summary.batch))
   return { kind: 'success', text: lines.join('\n') }
 }

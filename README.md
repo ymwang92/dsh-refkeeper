@@ -21,9 +21,9 @@ Every entry starts with a bibliographic record and a verdict — title, authors,
 year, venue, identifiers, and `verification: verified 3/3 · crossref, openalex`.
 That layer is always there, whatever path produced the entry.
 
-On top of it sit four **optional** annotation fields. The agent fills them when
-it saves a reference through `ref_save`; when present they travel with the entry
-all the way into the export:
+On top of it sit four **optional** annotation fields, written either
+automatically after a capture or explicitly through `ref_save`; when present they
+travel with the entry all the way into the export:
 
 | Annotation | Answers | Lands in |
 | --- | --- | --- |
@@ -32,10 +32,22 @@ all the way into the export:
 | `evidence` | the exact claim in the conversation that grounds it | RIS `N1` (`Evidence: …`), `annotated.md` |
 | `caveats` | limits you should know before citing it | BibTeX `note`, RIS `N1` (`Caveats: …`), `annotated.md` |
 
-A capture from the panel stores the bibliographic record only — no annotations.
+A capture asks the profile's default model for these four fields after the
+record is stored, grounding each one in the transcript lines that actually cite
+the work. `evidence` is checked against those lines and dropped if the model
+quotes something that is not there. When no model is configured, or the excerpt
+is not in the captured range, the entry stays bibliographic and the capture
+result says why.
+
 Export and `annotated.md` work either way: an entry without annotations is still
 written in full, verdict included. What annotations add is traceability: why the
 work is in the manuscript, and which sentence put it there.
+
+A field the excerpt does not support stays **empty** — no `note` field at all in
+BibTeX, no `N1` row in RIS, no line in `annotated.md`. Sentences that only
+describe the absence ("the excerpt does not mention this work", "no citation
+sentence is available") are rejected at the same gate as fabricated quotes: they
+say nothing about the paper, and in a `.bib` they read as content.
 
 ## What it does
 
@@ -43,11 +55,13 @@ work is in the manuscript, and which sentence put it there.
    Candidates come from identifiers (DOI, arXiv id, ISBN, report number) and
    from parsed reference lines in APA, GB/T 7714 and IEEE shapes. Tool output is
    excluded by default — search results echo DOIs and would otherwise drown the
-   list; `--include-tools` opts back in.
+   list; `--include-tools` opts back in. Saving also makes one model call for
+   annotations, so a capture takes a few seconds longer (60 s cap).
 2. **Verify.** Four registries are queried in parallel. An entry enters the main
    library only when all three gates pass *and* at least one registry answered.
-3. **Annotate.** The four fields above are written by the model, editable in the
-   panel, and exported with the reference.
+3. **Annotate.** After a capture the profile's default model writes the four
+   fields above, grounded in the lines that cite the work; fields the excerpt
+   does not support stay empty. (`ref_save` can still carry them by hand.)
 4. **Export.** BibTeX and/or RIS, for the last capture, the rows you ticked, or
    the whole library, into `refs/exports/` or a folder you set once.
 
