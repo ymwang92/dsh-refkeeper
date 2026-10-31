@@ -4,13 +4,17 @@
 
 ![awesome · DSH plugin](https://awesome-dsh-plugin.com/badge.svg) ![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
-**面向「对话里已经被引用过的文献」的引用管理器——它记录的是这篇文献为什么被引用，而不只是它存在。**
+**面向「对话里已经被引用过的文献」的引用管理器。** 它把这些文献从对话里取出来，逐个用四个注册表核对，再导出成 BibTeX 或 RIS——如果模型留下了注解，注解也一起带走。
 
-DeepSeek Harness 的模型会在回答里随手引文：工具结果里的一个 DOI、一段 APA 格式的参考文献、两轮前提到的某份报告。`dsh-refkeeper` 把这些收集起来，用 Crossref / OpenAlex / arXiv / DataCite 核对，附上模型对每篇的解读，再把你保留的条目写成 BibTeX 或 RIS。
+![输入框上方的捕获面板](docs/images/panel.png)
 
-## 注解才是重点
+DeepSeek Harness 的模型会在回答里随手引文：工具结果里的一个 DOI、一段 APA 格式的参考文献、两轮前提到的某份报告。`dsh-refkeeper` 把这些收集起来，用 Crossref / OpenAlex / arXiv / DataCite 核对，只留下通过校验的条目。
 
-能被查到的引用，不等于可以信赖的引用。每条文献带四个注解，并且一路跟随到导出结果里：
+## 两层内容：文献记录，以及对它的解读
+
+每条目都先有一条书目记录和一个校验结论——标题、作者、年份、出处、标识符，以及 `verification: verified 3/3 · crossref, openalex`。这一层永远存在，无论从哪条路径进来。
+
+在这之上是四个**可选**注解字段。模型通过 `ref_save` 保存文献时会填上它们；存在时，它们随条目一路进入导出结果：
 
 | 注解 | 回答什么问题 | 落到哪里 |
 | --- | --- | --- |
@@ -19,7 +23,7 @@ DeepSeek Harness 的模型会在回答里随手引文：工具结果里的一个
 | `evidence` | 对话里哪句话支撑它 | RIS `N1`（`Evidence: …`）、`annotated.md` |
 | `caveats` | 引用前该知道的限制 | BibTeX `note`、RIS `N1`（`Caveats: …`）、`annotated.md` |
 
-这就是「引用管理器」与「BibTeX 生成器」的差别：存下来的不只是那篇论文，还有它为什么出现在稿子里。
+从面板「捕获并保存」得到的条目只有书目记录，没有注解。两种情况导出与 `annotated.md` 都正常：没有注解的条目照样完整写出，结论也在。注解增加的是可追溯性——这篇工作为什么在稿子里，以及是哪句话把它带进来的。
 
 ## 能做什么
 
@@ -51,7 +55,7 @@ DeepSeek Harness 的模型会在回答里随手引文：工具结果里的一个
 
 **写入原子且有锁。** `refs/*.json` 通过临时文件 + rename 落盘，外面套一层磁盘锁；陈旧锁按 inode + 内容身份原子回收（不看路径单值），所以两个会话同时捕获也不会写出半个库。
 
-**工具输出默认排除是有原因的。** 一次网页搜索结果会带十个没人引用的 DOI。早期把工具结果一并计入时，一个只有三篇真实论文的对话产出了 33 条「文献」；现在默认只信任 user 与 assistant 的正文。
+**工具输出默认排除。** 一次网页搜索结果会带十几个没人引用的 DOI，把真正被引用的那些埋掉。默认只信任 user 与 assistant 的正文，需要时用 `--include-tools` 打开。
 
 ## 安装
 
@@ -120,7 +124,7 @@ refs/refs.json          通过校验的条目，含注解
 refs/quarantine.json    ⚠ 未通过某一门的条目
 refs/last-capture.json  最近一次捕获的产物，也是默认导出范围
 refs/settings.json      记住的导出文件夹
-refs/annotated.md       人类可读视图：摘要、与工作的关系、证据、注意事项
+refs/annotated.md       人类可读视图：书目记录、校验结论，以及（若有）注解
 refs/exports/           默认导出目的地
 ```
 

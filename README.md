@@ -4,19 +4,26 @@
 
 ![awesome · DSH plugin](https://awesome-dsh-plugin.com/badge.svg) ![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 
-**A citation manager for the references a conversation already cites — it keeps
-why each work matters, not just that it exists.**
+**A reference manager for the citations a conversation already made.** It pulls
+them out of the transcript, checks each one against four registries, and exports
+BibTeX or RIS — carrying the agent's annotations along when there are any.
 
-DeepSeek Harness agents quote papers mid-answer: a DOI in a tool result, an
-APA line in a summary, a report named two turns ago. `dsh-refkeeper` collects
-those, checks them against Crossref / OpenAlex / arXiv / DataCite, attaches the
-model's reading of each one, and writes BibTeX or RIS for the ones you keep.
+![The capture panel above the composer](docs/images/panel.png)
 
-## The annotation is the point
+DeepSeek Harness agents quote papers mid-answer: a DOI in a tool result, an APA
+line in a summary, a report named two turns ago. `dsh-refkeeper` collects those,
+verifies them against Crossref / OpenAlex / arXiv / DataCite, and keeps the ones
+that survive.
 
-A citation you can check is not the same as a citation you can trust. Every
-entry carries four annotations, and they travel with the reference all the way
-into the export:
+## Two layers: the record, and the reading of it
+
+Every entry starts with a bibliographic record and a verdict — title, authors,
+year, venue, identifiers, and `verification: verified 3/3 · crossref, openalex`.
+That layer is always there, whatever path produced the entry.
+
+On top of it sit four **optional** annotation fields. The agent fills them when
+it saves a reference through `ref_save`; when present they travel with the entry
+all the way into the export:
 
 | Annotation | Answers | Lands in |
 | --- | --- | --- |
@@ -25,8 +32,10 @@ into the export:
 | `evidence` | the exact claim in the conversation that grounds it | RIS `N1` (`Evidence: …`), `annotated.md` |
 | `caveats` | limits you should know before citing it | BibTeX `note`, RIS `N1` (`Caveats: …`), `annotated.md` |
 
-That is the difference between a BibTeX generator and a reference manager: what
-gets stored is not just the paper, but the reason it is in the manuscript.
+A capture from the panel stores the bibliographic record only — no annotations.
+Export and `annotated.md` work either way: an entry without annotations is still
+written in full, verdict included. What annotations add is traceability: why the
+work is in the manuscript, and which sentence put it there.
 
 ## What it does
 
@@ -79,10 +88,9 @@ file + rename, guarded by an on-disk lock whose stale copies are reclaimed
 atomically (inode + content identity, not path alone), so two sessions capturing
 at once cannot half-write the library.
 
-**Tool output is excluded for a reason.** A web-search result quotes ten DOIs
-that nobody cited. Including tool roles by default produced 33 "references" for
-a conversation with three real papers; the default now trusts the user's and the
-assistant's text only.
+**Tool output is excluded by default.** A web-search result quotes a dozen DOIs
+that nobody cited, and they bury the ones that were. The default trusts the
+user's and the assistant's text; `--include-tools` opts back in.
 
 ## Install
 
@@ -154,7 +162,7 @@ refs/refs.json          verified references, with their annotations
 refs/quarantine.json    ⚠ entries that failed a gate
 refs/last-capture.json  what the last capture produced, and the default export scope
 refs/settings.json      the remembered export folder
-refs/annotated.md       the human-readable view: summary, why it matters, evidence, caveats
+refs/annotated.md       the human-readable view: record, verdict, and any annotations
 refs/exports/           default export destination
 ```
 
