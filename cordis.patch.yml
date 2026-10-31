@@ -1,0 +1,6 @@
+# Installed as a dsh bundle. `name` is the package name so Node module
+# resolution finds the host entry; `id` is only the patch row identity.
+- insert:
+    - id: refkeeper
+      name: dsh-refkeeper
+      config: {}

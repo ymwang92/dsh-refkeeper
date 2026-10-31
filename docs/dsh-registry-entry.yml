@@ -1,0 +1,12 @@
+# Copy this file into the awesome-dsh-plugin repo as
+#   data/plugins/<owner>__dsh-refkeeper.yml
+# and open a pull request there. One YAML file per plugin is the whole
+# submission; the READMEs are generated from these files.
+url: https://github.com/ymwang92/dsh-refkeeper
+name: ymwang92/dsh-refkeeper
+category: tools
+description:
+  en: Captures references cited in the conversation, verifies them against Crossref, OpenAlex, arXiv and DataCite, and exports the survivors as BibTeX or RIS.
+  zh: 从对话中捕获被引用的文献，先用 Crossref、OpenAlex、arXiv、DataCite 校验，再把通过的条目导出为 BibTeX 或 RIS。
+# optional storefront tile; without it the market falls back to your avatar
+# icon: https://raw.githubusercontent.com/ymwang92/dsh-refkeeper/main/docs/images/icon.png

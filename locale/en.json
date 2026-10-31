@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Reference Keeper",
+    "description": "Capture references mentioned in the conversation, annotate them, verify them against authoritative sources, and export BibTeX or RIS."
+  }
+}
