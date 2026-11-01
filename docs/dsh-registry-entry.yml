@@ -10,3 +10,5 @@ description:
   zh: 收集对话里引用过的文献，逐条到 Crossref、OpenAlex、arXiv、DataCite 核对，通过核对的导出为 BibTeX 或 RIS。
 # optional storefront tile; without it the market falls back to your avatar
 icon: https://raw.githubusercontent.com/ymwang92/dsh-refkeeper/main/docs/images/icon.png
+# prebuilt package, so installs skip the build-approval step
+tarball: https://github.com/ymwang92/dsh-refkeeper/releases/download/v0.1.0/dsh-refkeeper-0.1.0.tgz
