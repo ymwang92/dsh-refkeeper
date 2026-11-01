@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.zh.md)
 
-![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg) ![version](https://img.shields.io/badge/version-0.1.0-blue.svg)
+![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg) [![npm](https://img.shields.io/npm/v/dsh-refkeeper.svg)](https://www.npmjs.com/package/dsh-refkeeper)
 
 A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin. It reads a conversation, collects the papers that conversation cited, checks each paper against Crossref, OpenAlex, arXiv and DataCite, and exports the confirmed entries as BibTeX or RIS. Papers that fail the check go into a separate quarantine file instead of the library.
 
@@ -35,7 +35,9 @@ Asking the model for a `.bib` file is faster, but models make up page ranges, DO
 
 ## Install
 
-In DSH open **Settings → Plugins**, add the GitHub spec `github:ymwang92/dsh-refkeeper`, enable it for the current profile, and reload. The repository ships the built `lib/`, so no build step is needed. An npm package is planned; until then the Git install is the supported route.
+In DSH open **Settings → Plugins → Add plugin** and enter `dsh-refkeeper`. The package is published on npm, so this is one step and runs no build: the tarball ships the built `lib/`. Enable it for the current profile, then reload.
+
+To track the repository instead of the published version, paste the Git address `https://github.com/ymwang92/dsh-refkeeper` into the same dialog. The repository commits `lib/` too, so that route needs no build either.
 
 ## Use
 

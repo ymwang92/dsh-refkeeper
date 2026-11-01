@@ -2,7 +2,7 @@
 
 [English](README.md) · **简体中文**
 
-![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg) ![version](https://img.shields.io/badge/version-0.1.0-blue.svg)
+![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg) [![npm](https://img.shields.io/npm/v/dsh-refkeeper.svg)](https://www.npmjs.com/package/dsh-refkeeper)
 
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件。它读取一段对话，把对话里引用过的文献收集起来，逐条到 Crossref、OpenAlex、arXiv、DataCite 核对，通过核对的条目导出为 BibTeX 或 RIS。没通过的放进单独的隔离文件，不进主库。
 
@@ -35,7 +35,9 @@
 
 ## 安装
 
-在 DSH 的**设置 → 插件**里添加 GitHub 源 `github:ymwang92/dsh-refkeeper`，在当前 profile 中启用，然后重载。仓库里已带构建好的 `lib/`，不需要自己构建。npm 包还在计划中，目前支持从 Git 安装。
+在 DSH 打开**设置 → 插件 → 添加插件**，输入 `dsh-refkeeper`。这个包已发布到 npm，一步装好，不跑构建（tarball 里带 `lib/`）。在当前 profile 启用后重载。
+
+想跟随仓库更新而不是锁定发布版，就在同一个输入框里填 Git 地址 `https://github.com/ymwang92/dsh-refkeeper`；仓库里也提交了 `lib/`，同样不需要构建。
 
 ## 使用
 
