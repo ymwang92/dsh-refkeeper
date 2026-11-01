@@ -6,7 +6,7 @@ url: https://github.com/ymwang92/dsh-refkeeper
 name: ymwang92/dsh-refkeeper
 category: tools
 description:
-  en: Verify and export the references your AI conversation already cited — BibTeX/RIS with evidence-anchored annotations, checked against Crossref, OpenAlex, arXiv and DataCite.
-  zh: 把对话里已经引用过的文献核验清楚再导出——BibTeX / RIS，注解锚定原句，先过 Crossref、OpenAlex、arXiv、DataCite 四道注册表。
+  en: Collects the papers a DeepSeek Harness conversation cited, checks each one against Crossref, OpenAlex, arXiv and DataCite, and exports the confirmed entries as BibTeX or RIS.
+  zh: 收集对话里引用过的文献，逐条到 Crossref、OpenAlex、arXiv、DataCite 核对，通过核对的导出为 BibTeX 或 RIS。
 # optional storefront tile; without it the market falls back to your avatar
-# icon: https://raw.githubusercontent.com/ymwang92/dsh-refkeeper/main/docs/images/icon.png
+icon: https://raw.githubusercontent.com/ymwang92/dsh-refkeeper/main/docs/images/icon.png
