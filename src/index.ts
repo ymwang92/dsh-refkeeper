@@ -1,4 +1,7 @@
-import { Service } from '@deepseek-ai/cordis'
+// `@deepseek-ai/cordis` is a type-only dependency on purpose: importing the
+// runtime package from the published bundle makes activation fail in a profile
+// that cannot resolve the peer (`ERR_MODULE_NOT_FOUND`). Every other published
+// plugin avoids it the same way.
 import type { Context } from '@deepseek-ai/cordis'
 import { CommandDefinitionId } from '@deepseek-ai/dsh-commands'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -892,11 +895,20 @@ export const refCaptureTool = defineTool({
  * Host plugin. Registers the diagnostic tool, the capture tool, and the `/refs`
  * command over one shared read/extract path.
  */
-export default class RefkeeperService extends Service {
-  static inject = ['tools']
+// No plugin-level `inject` on purpose: the loader does not record it for this
+// entry, so `ctx.tools` threw `cannot get property "tools" without inject` and
+// the whole activation failed. A local injection is what the other shipped
+// plugins use, and it works on every loader version.
+export default {
+  name: 'refkeeper',
+  apply(ctx: Context) {
+    ctx.inject(['tools'], (toolCtx) => {
+      mount(toolCtx)
+    })
+  },
+}
 
-  constructor(ctx: Context) {
-    super(ctx, SERVICE_KEY)
+function mount(ctx: Context) {
     ctx.inject(['sessionProjections'], (projectionCtx) => {
       projections = (projectionCtx as unknown as { sessionProjections: ProjectionReader })
         .sessionProjections
@@ -1035,5 +1047,4 @@ export default class RefkeeperService extends Service {
         'dsh-refkeeper: /refs command',
       )
     })
-  }
 }

@@ -1,4 +1,4 @@
-import { Context, Service } from "@deepseek-ai/cordis";
+import { Context } from "@deepseek-ai/cordis";
 /** Tiny TTL cache keyed by URL; only successful responses are stored. */
 declare class LookupCache {
   private readonly entries;
@@ -88,8 +88,8 @@ export declare const refCaptureTool: import("@deepseek-ai/dsh-tools").ToolDefini
  * Host plugin. Registers the diagnostic tool, the capture tool, and the `/refs`
  * command over one shared read/extract path.
  */
-export default class RefkeeperService extends Service {
-  static inject: string[];
-  constructor(ctx: Context);
-}
-export {};
+declare const _default: {
+  name: string;
+  apply(ctx: Context): void;
+};
+export { _default as default };
