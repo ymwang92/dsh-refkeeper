@@ -8,6 +8,8 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin. It
 
 ![The capture panel above the composer](docs/images/panel-en.png)
 
+If this plugin saves you time, a star on GitHub helps other people find it. If you hit a bug or want a feature, open an issue — Chinese or English, either is fine. I read all of them and add the useful ones to the roadmap.
+
 ## What it does
 
 - **Collects citations.** Scope can be one turn, the last N turns, or the whole session. It recognises DOIs, arXiv ids, ISBNs and report numbers, and also reference lines written in APA, GB/T 7714 or IEEE style.
