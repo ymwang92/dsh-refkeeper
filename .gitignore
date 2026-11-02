@@ -7,3 +7,6 @@ coverage/
 .refkeeper/
 .e2e-workspace/
 refs/
+
+# never commit 2FA recovery codes
+npm_recovery_codes.txt
