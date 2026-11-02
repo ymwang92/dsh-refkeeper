@@ -2,7 +2,7 @@
 
 [English](README.md) · **简体中文**
 
-![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg) [![npm](https://img.shields.io/npm/v/dsh-refkeeper.svg)](https://www.npmjs.com/package/dsh-refkeeper)
+![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg) [![npm](https://img.shields.io/npm/v/dsh-refkeeper.svg)](https://www.npmjs.com/package/dsh-refkeeper) [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件。它读取一段对话，把对话里引用过的文献收集起来，逐条到 Crossref、OpenAlex、arXiv、DataCite 核对，通过核对的条目导出为 BibTeX 或 RIS。没通过的放进单独的隔离文件，不进主库。
 
