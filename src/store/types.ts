@@ -1,3 +1,5 @@
+import { stripMarkup } from '../core/text.ts'
+
 /** Persistent shapes for `refs/refs.json` and `refs/quarantine.json`.
  *
  * The wire format is versioned: `schemaVersion` is bumped whenever a field's
@@ -149,16 +151,22 @@ export function emptyQuarantine(now: string): QuarantineState {
   return { schemaVersion: SCHEMA_VERSION, updatedAt: now, entries: [] }
 }
 
-/** Stable identity used for dedupe: strongest identifier first, else title+year. */
-export function referenceId(
+/** Canonical identity: prefer persistent identifiers, then normalized title+year. */
+export function referenceIdentityKey(
   ref: Pick<StoredReference, 'identifiers' | 'title' | 'year'>,
 ): string {
   const { doi, arxiv, isbn, reportNumber } = ref.identifiers
-  if (doi) return `doi:${doi.toLowerCase()}`
-  if (arxiv) return `arxiv:${arxiv.toLowerCase()}`
-  if (isbn) return `isbn:${isbn}`
-  if (reportNumber) return `report:${reportNumber.toLowerCase()}`
-  return `title:${ref.title.toLowerCase().replace(/\s+/gu, ' ').trim()}|${ref.year ?? ''}`
+  if (doi?.trim()) return `doi:${doi.trim().toLowerCase()}`
+  if (arxiv?.trim()) return `arxiv:${arxiv.trim().toLowerCase()}`
+  if (isbn?.trim()) return `isbn:${isbn.replace(/[-\s]/gu, '').toLowerCase()}`
+  if (reportNumber?.trim()) return `report:${reportNumber.trim().toLowerCase()}`
+  return `title:${stripMarkup(ref.title).normalize('NFKC').toLowerCase().replace(/\s+/gu, ' ').trim()}|${ref.year ?? ''}`
+}
+
+export function referenceId(
+  ref: Pick<StoredReference, 'identifiers' | 'title' | 'year'>,
+): string {
+  return referenceIdentityKey(ref)
 }
 
 /** Deterministic order: addedAt then id, so two exports of one store are byte-identical. */

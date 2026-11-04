@@ -2,9 +2,9 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { coerceReference, loadStore, saveReference, writeQuarantine } from '../src/store/io.ts'
+import { coerceReference, loadQuarantine, loadStore, saveReference, writeQuarantine } from '../src/store/io.ts'
 import type { HostFsLike } from '../src/host/store-command.ts'
-import { isStoreSubcommand, parseStoreCommand, runStoreCommand, STORE_SUBCOMMANDS } from '../src/host/store-command.ts'
+import { isStoreSubcommand, parseStoreCommand, runStoreCommand, saveFromPayload, STORE_SUBCOMMANDS } from '../src/host/store-command.ts'
 import { writeBatch } from '../src/host/capture-batch.ts'
 import { decodeDir } from '../src/core/panel.ts'
 
@@ -44,9 +44,15 @@ afterEach(async () => {
 function fakeFs(writes: Write[], failRis = false): HostFsLike {
   return {
     resolve: async (path) => ({ displayPath: path }),
-    stat: async () => ({ type: 'directory' }),
+    stat: async (target) =>
+      writes.some((write) => write.path === target.displayPath) ? { type: 'file' } : { type: 'directory' },
     processPath: (target) => target.displayPath,
     writeText: async (target, content, intent, signal, sandboxPolicy) => {
+      // The host refuses to replace a file it was not asked to read first, which
+      // is what a same-minute second export hits.
+      if (writes.some((write) => write.path === target.displayPath)) {
+        throw new Error(`cannot overwrite existing "${target.displayPath}" without reading it first`)
+      }
       writes.push({ path: target.displayPath, content, kind: intent.kind, signal, sandboxPolicy })
       if (failRis && target.displayPath.endsWith('.ris')) throw new Error('sandbox denied')
     },
@@ -60,6 +66,159 @@ function fencingFs(writes: Write[], inside: boolean): HostFsLike {
   }
 }
 
+describe('promote', () => {
+  it('requires an explicit reason for manual promotion', () => {
+    expect(parseStoreCommand('promote')).toMatchObject({ sub: 'promote', manual: false })
+    expect(parseStoreCommand('promote --manual')).toHaveProperty('error')
+    expect(parseStoreCommand('promote --reason=nope')).toHaveProperty('error')
+    expect(parseStoreCommand("promote --manual --reason='reviewed\ by\ editor'")).toMatchObject({
+      sub: 'promote', manual: true, reason: 'reviewed by editor',
+    })
+    // The panel confirms one row, so --ids has to be a legal promote flag.
+    expect(parseStoreCommand('promote --ids=WyJub3QtYS1yZWFsLWlkIl0')).toMatchObject({ sub: 'promote' })
+    expect(parseStoreCommand('promote --all')).toHaveProperty('error')
+    expect(parseStoreCommand('list --ids=abc')).toHaveProperty('error')
+  })
+
+  it('does not record a ⚠ entry when the work is already in the library', async () => {
+    const item = coerceReference({
+      title: 'Meteorological Drought', type: 'journalArticle',
+      authors: [{ family: 'Palmer', given: 'W. C.' }], year: 1965,
+      verification: { status: 'manual', checkedAt: NOW, note: 'panel confirmation' },
+    }, NOW)
+    if (!item) throw new Error('fixture did not coerce')
+    await saveReference(workspace, item, { now: NOW })
+
+    const result = await saveFromPayload(
+      { title: 'Meteorological Drought', authors: ['Palmer, W. C.'], year: 1965, type: 'journalArticle' },
+      {
+        workspace,
+        now: () => NOW,
+        verify: async () => ({
+          status: 'warning' as const,
+          title: { pass: false, score: 0 },
+          year: { pass: false },
+          firstAuthor: { pass: false },
+          passed: 0,
+          sources: [],
+          partial: false,
+          reasons: ['no-record'],
+        }),
+      },
+    )
+    expect(result).toMatchObject({ kind: 'success', quarantined: false, reason: 'already in the library' })
+    expect(result.text).toContain('already in the library')
+    expect((await loadQuarantine(workspace)).entries).toHaveLength(0)
+  })
+
+  it('says the row is already in the library when its id left quarantine', async () => {
+    const item = coerceReference({
+      title: 'Already confirmed work', type: 'journalArticle', authors: [], year: 1965,
+      verification: { status: 'manual', checkedAt: NOW, note: 'panel confirmation' },
+    }, NOW)
+    if (!item) throw new Error('fixture did not coerce')
+    await saveReference(workspace, item, { now: NOW })
+    const ids = Buffer.from(JSON.stringify([item.id]), 'utf8').toString('base64url')
+    const result = await runStoreCommand(`promote --ids=${ids}`, { workspace, now: () => NOW })
+    expect(result.text).toContain('already in the library')
+    expect(result.text).toContain(item.id)
+    expect((await loadQuarantine(workspace)).entries).toHaveLength(0)
+  })
+
+  it('moves only live-verified records and supports reasoned manual promotion', async () => {
+    const item = coerceReference({
+      title: 'Quarantine promotion fixture', type: 'journalArticle', authors: [], year: 2023,
+      identifiers: { doi: '10.1000/promote-fixture' }, verification: { status: 'unverified' },
+    }, NOW)
+    if (!item) throw new Error('fixture did not coerce')
+    await writeQuarantine(workspace, { schemaVersion: 1, updatedAt: NOW, entries: [item] })
+    const notVerified = await runStoreCommand('promote', {
+      workspace, now: () => NOW, verify: async () => ({ status: 'warning' } as never),
+    })
+    expect(notVerified.text).toContain('still quarantined (did not verify)')
+    expect((await loadStore(workspace)).state.references).toHaveLength(1)
+    const manual = await runStoreCommand('promote --manual --reason=editor-reviewed', { workspace, now: () => NOW })
+    expect(manual.kind).toBe('success')
+    const main = await loadStore(workspace)
+    expect(main.state.references.find((ref) => ref.id === item.id)?.verification).toMatchObject({
+      status: 'manual',
+    })
+    // The manual note keeps what quarantine objected to, so the decision stays auditable.
+    expect(main.state.references.find((ref) => ref.id === item.id)?.verification.note).toContain('editor-reviewed')
+    expect(main.state.references.find((ref) => ref.id === item.id)?.verification.note).toContain('originally:')
+    expect((await (await import('../src/store/io.ts')).loadQuarantine(workspace)).entries).toHaveLength(0)
+  })
+
+  it('scopes a manual promotion to the ids the panel confirmed', async () => {
+    const first = coerceReference(
+      { title: 'First quarantined item', type: 'journalArticle', authors: [{ family: 'One', given: 'A.' }], year: 2020 },
+      NOW,
+    )
+    const second = coerceReference(
+      { title: 'Second quarantined item', type: 'journalArticle', authors: [{ family: 'Two', given: 'B.' }], year: 2021 },
+      NOW,
+    )
+    if (!first || !second) throw new Error('fixture did not coerce')
+    await writeQuarantine(workspace, { schemaVersion: 1, updatedAt: NOW, entries: [first, second] })
+
+    const { encodeFlag } = await import('../src/ui/payload.ts')
+    const run = await runStoreCommand(
+      `promote ${encodeFlag('ids', [first.id])} --manual ${encodeFlag('reason', 'confirmed in the panel')}`,
+      { workspace, now: () => NOW },
+    )
+    expect(run.kind).toBe('success')
+    expect(run.text).toContain('promoted 1 of 1 selected of 2 quarantined')
+
+    const main = await loadStore(workspace)
+    expect(main.state.references.map((ref) => ref.id)).toContain(first.id)
+    expect(main.state.references.map((ref) => ref.id)).not.toContain(second.id)
+    const notes = main.state.references.find((ref) => ref.id === first.id)?.verification.note ?? ''
+    expect(notes).toContain('confirmed in the panel')
+
+    const quarantine = await (await import('../src/store/io.ts')).loadQuarantine(workspace)
+    expect(quarantine.entries.map((ref) => ref.id)).toEqual([second.id])
+  })
+
+  it('rejects ids that are not in quarantine', async () => {
+    const run = await runStoreCommand('promote --manual --reason=confirmed --ids=WyJub3QtYS1yZWFsLWlkIl0', {
+      workspace, now: () => NOW,
+    })
+    expect(run.kind).toBe('error')
+    expect(run.text).toContain('none of those ids are in quarantine')
+  })
+
+  it('replaces an existing library row instead of dropping the fresh verification', async () => {
+    const existing = (await loadStore(workspace)).state.references[0]
+    if (!existing) throw new Error('fixture missing')
+    const duplicate = coerceReference(
+      {
+        title: existing.title,
+        type: 'journalArticle',
+        authors: [{ family: 'Example', given: 'A.' }],
+        year: 2024,
+        containerTitle: 'Journal of Tests',
+        identifiers: { doi: '10.1000/export-fixture' },
+      },
+      NOW,
+    )
+    if (!duplicate) throw new Error('fixture did not coerce')
+    if (duplicate.id !== existing.id) throw new Error('fixture ids diverged')
+    await writeQuarantine(workspace, { schemaVersion: 1, updatedAt: NOW, entries: [duplicate] })
+
+    const run = await runStoreCommand('promote --manual --reason=confirmed-after-retry', {
+      workspace, now: () => NOW,
+    })
+    expect(run.kind).toBe('success')
+    expect(run.text).toContain('1 replaced an existing entry')
+
+    const main = await loadStore(workspace)
+    expect(main.state.references).toHaveLength(1)
+    expect(main.state.references[0]?.verification.status).toBe('manual')
+    const quarantine = await (await import('../src/store/io.ts')).loadQuarantine(workspace)
+    expect(quarantine.entries).toHaveLength(0)
+  })
+})
+
 describe('export directory picker', () => {
   it('parses choose-dir only for export and rejects out conflicts', () => {
     expect(parseStoreCommand('export --choose-dir --format=bibtex')).toMatchObject({
@@ -71,6 +230,35 @@ describe('export directory picker', () => {
     expect(parseStoreCommand('export --choose-dir --format=bibtex --out=refs.bib')).toMatchObject({
       error: '--choose-dir cannot be combined with --out',
     })
+  })
+
+  it('numbers a second export in the same minute instead of failing', async () => {
+    const writes: Write[] = []
+    const deps = {
+      workspace,
+      now: () => NOW,
+      directoryPicker: { pick: async () => '/picked/dir' },
+      fs: fakeFs(writes),
+    }
+    const first = await runStoreCommand('export --choose-dir --format=both --all', deps)
+    const second = await runStoreCommand('export --choose-dir --format=both --all', deps)
+    expect(first.kind).toBe('success')
+    expect(second.kind).toBe('success')
+    expect(writes.map((write) => write.path)).toEqual([
+      '/picked/dir/refs-20261028-1200.bib',
+      '/picked/dir/refs-20261028-1200.ris',
+      '/picked/dir/refs-20261028-1200-2.bib',
+      '/picked/dir/refs-20261028-1200-2.ris',
+    ])
+  })
+
+  it('numbers a second workspace export in the same minute too', async () => {
+    const first = await runStoreCommand('export --all --format=bibtex', { workspace, now: () => NOW })
+    const second = await runStoreCommand('export --all --format=bibtex', { workspace, now: () => NOW })
+    expect(first.kind).toBe('success')
+    expect(second.kind).toBe('success')
+    expect(first.text).toContain('refs-20261028-1200.bib')
+    expect(second.text).toContain('refs-20261028-1200-2.bib')
   })
 
   it('writes selected formats with create-if-absent and reports absolute paths', async () => {
@@ -241,6 +429,82 @@ describe('remove', () => {
   })
 })
 
+describe('remove and edit keep both tables consistent', () => {
+  it('remove deletes the stale quarantine copy of the same work', async () => {
+    const duplicate = coerceReference(
+      {
+        title: 'A stale quarantine copy of the exported fixture',
+        type: 'journalArticle',
+        authors: [{ family: 'Example', given: 'A.' }],
+        year: 2024,
+        identifiers: { doi: '10.1000/export-fixture' },
+      },
+      NOW,
+    )
+    if (!duplicate) throw new Error('fixture did not coerce')
+    await writeQuarantine(workspace, { schemaVersion: 1, updatedAt: NOW, entries: [duplicate] })
+
+    const result = await runStoreCommand('remove --all --yes', { workspace, now: () => NOW })
+
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('also dropped 1 quarantined duplicate(s)')
+    expect((await loadStore(workspace)).state.references).toHaveLength(0)
+    expect((await loadQuarantine(workspace)).entries).toHaveLength(0)
+  })
+
+  it('edit applies the patch to the duplicate copy in the other table', async () => {
+    const duplicate = coerceReference(
+      {
+        title: 'A stale quarantine copy of the exported fixture',
+        type: 'journalArticle',
+        authors: [{ family: 'Example', given: 'A.' }],
+        year: 2024,
+        identifiers: { doi: '10.1000/export-fixture' },
+      },
+      NOW,
+    )
+    if (!duplicate) throw new Error('fixture did not coerce')
+    await writeQuarantine(workspace, { schemaVersion: 1, updatedAt: NOW, entries: [duplicate] })
+
+    const store = await loadStore(workspace, { now: NOW })
+    const saved = store.state.references[0]
+    if (saved === undefined) throw new Error('fixture missing')
+    const { encodeFlag } = await import('../src/ui/payload.ts')
+    const result = await runStoreCommand(
+      `edit ${encodeFlag('ids', [saved.id])} ${encodeFlag('payload', { title: 'A corrected title' })}`,
+      { workspace, now: () => NOW },
+    )
+
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('also updated 1 duplicate copy/copies')
+    expect((await loadQuarantine(workspace)).entries[0]?.title).toBe('A corrected title')
+  })
+
+  it('editing a quarantine row updates the main copy that shares its identity', async () => {
+    const duplicate = coerceReference(
+      {
+        title: 'A stale quarantine copy of the exported fixture',
+        type: 'journalArticle',
+        authors: [{ family: 'Example', given: 'A.' }],
+        year: 2024,
+        identifiers: { doi: '10.1000/export-fixture' },
+      },
+      NOW,
+    )
+    if (!duplicate) throw new Error('fixture did not coerce')
+    await writeQuarantine(workspace, { schemaVersion: 1, updatedAt: NOW, entries: [duplicate] })
+
+    const { encodeFlag } = await import('../src/ui/payload.ts')
+    const result = await runStoreCommand(
+      `edit ${encodeFlag('ids', [duplicate.id])} ${encodeFlag('payload', { pages: '1-10' })}`,
+      { workspace, now: () => NOW },
+    )
+
+    expect(result.kind).toBe('success')
+    expect((await loadStore(workspace)).state.references[0]?.pages).toBe('1-10')
+  })
+})
+
 describe('export scope follows the last capture', () => {
   it('exports only the captured entries and points at --all for the rest', async () => {
     const store = await loadStore(workspace, { now: NOW })
@@ -272,7 +536,7 @@ describe('export scope follows the last capture', () => {
     expect(result.text).toContain('exported 1 of 1 reference(s) — whole library')
   })
 
-  it('falls back to the whole library when the batch has nothing exportable', async () => {
+  it('says the capture scope is empty instead of silently exporting the library', async () => {
     await writeBatch(workspace, {
       capturedAt: NOW,
       scope: 'whole conversation',
@@ -282,7 +546,10 @@ describe('export scope follows the last capture', () => {
     const result = await runStoreCommand('export', { workspace, now: () => NOW })
 
     expect(result.kind).toBe('success')
-    expect(result.text).toContain('whole library (the last capture stored nothing exportable)')
+    expect(result.text).toContain('nothing from the last capture is still in the library')
+    // The old behaviour wrote the whole library here, which made a stale batch
+    // look like a successful "export this capture".
+    expect(result.text).not.toContain('exported 1 of')
   })
 
   it('adds the quarantined capture entries only under --include-quarantine', async () => {

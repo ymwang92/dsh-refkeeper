@@ -147,6 +147,7 @@ Registry coverage for Chinese journals is thin: CNKI, Wanfang and CQVIP links ar
 | Check one reference | `/refs verify --doi=10.1002/joc.1688` |
 | Read the library | `/refs list [--quarantine]` |
 | Fill in missing volume, pages, publisher | `/refs enrich [--quarantine]` |
+| Promote verified quarantine entries | `/refs promote [--ids=<payload>]` or `/refs promote --manual --reason=<text>` |
 | Edit one field | `/refs edit --id=<id> --payload=<base64url(json)>` |
 | Remove entries | `/refs remove <id\|doi\|arxiv>...` or `/refs remove --all --yes` |
 | Export | `/refs export [--format=bibtex\|ris\|both] [--all] [--ids=...] [--out=path]` |
@@ -163,6 +164,7 @@ Registry coverage for Chinese journals is thin: CNKI, Wanfang and CQVIP links ar
 /refs list [--limit=N] [--quarantine]
 /refs edit --id=<id> --payload=<base64url(json)>
 /refs enrich [--quarantine]
+/refs promote [--ids=<payload>] [--manual --reason=<text>]
 /refs remove <id|doi|arxiv>... [--quarantine]
 /refs remove --all --yes [--quarantine]
 /refs export [--format=bibtex|ris|both] [--out=path] [--include-quarantine]
@@ -170,9 +172,17 @@ Registry coverage for Chinese journals is thin: CNKI, Wanfang and CQVIP links ar
 /refs dir [--set=<base64url(path)>|--clear]
 ```
 
+`/refs promote` re-verifies quarantine entries against live registries and moves only `verified` results. `--ids` narrows it to the rows you ticked in the panel, which is what the two buttons on a quarantined row send: "Re-verify" runs the checks, "Store as manual" moves the row with a recorded `manual` status and a reason. A promoted entry that already exists in the library replaces that row instead of leaving the old record behind.
+
 Without `--save`, `/refs capture` only previews candidates. Export defaults to the
 last saved capture; `--all` exports the library instead. Long identifiers are
 passed base64url-encoded because real ids contain spaces, `<>`, `;` and parentheses.
+
+The same work is stored once even if both tables knew about it: a reference that
+quarantined first and was captured successfully later is merged by identity
+(DOI, arXiv id, ISBN or title + year), and `remove` / `edit` apply to both
+tables so the leftover copy cannot resurface in an `--include-quarantine`
+export.
 
 </details>
 
@@ -223,6 +233,10 @@ npm run build     # tsdown for the host bundle, then the client bundle
 ```
 
 `tsdown` clears `lib/`, so run the client bundle afterwards. Node 22 or newer.
+
+## Changelog
+
+What changed in each release, and why, is in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

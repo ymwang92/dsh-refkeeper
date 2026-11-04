@@ -165,6 +165,7 @@ export async function saveCaptured(
           ...identity,
           status: 'saved',
           ...(result.id === undefined ? {} : { id: result.id }),
+          ...(result.reason === undefined ? {} : { reason: result.reason }),
           ...(result.fields === undefined ? {} : { fields: result.fields }),
         })
       }

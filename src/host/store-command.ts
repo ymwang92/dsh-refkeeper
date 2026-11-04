@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
@@ -11,6 +12,7 @@ import {
   coerceReference,
   loadQuarantine,
   loadStore,
+  promoteQuarantined,
   saveQuarantined,
   saveReference,
   storePaths,
@@ -19,7 +21,7 @@ import {
 } from '../store/io.ts'
 import { exportableOf, readBatch } from './capture-batch.ts'
 import type { CaptureBatch } from './capture-batch.ts'
-import { SCHEMA_VERSION, StoreError, referenceId } from '../store/types.ts'
+import { SCHEMA_VERSION, StoreError, referenceId, referenceIdentityKey } from '../store/types.ts'
 import type { RefVerification, StoredReference, StoredVerificationStatus } from '../store/types.ts'
 import type { SourceRecord, VerificationReport } from '../verify/types.ts'
 
@@ -32,6 +34,7 @@ export const STORE_USAGE = [
   '  /refs list [--limit=N] [--quarantine]              inspect the library',
   '  /refs edit --id=<id> --payload=<base64url(json)>   correct one entry\'s fields',
   '  /refs enrich [--quarantine]                        refill missing fields from registries',
+  '  /refs promote [--ids=<payload>] [--manual --reason=<text>]  reverify and move entries',
   '  /refs remove <id|doi|arxiv>... [--quarantine]      delete specific entries',
   '  /refs remove --all --yes [--quarantine]            empty the table',
   '  /refs export [--format=bibtex|ris|both] [--out=path] [--include-quarantine]',
@@ -51,7 +54,7 @@ export const STORE_USAGE = [
  * here but missing from that routing list reaches `runRefsCommand` and is
  * reported as `unknown subcommand`, which is exactly what happened to `dir`.
  */
-export const STORE_SUBCOMMANDS = ['save', 'export', 'list', 'remove', 'edit', 'enrich', 'dir'] as const
+export const STORE_SUBCOMMANDS = ['save', 'export', 'list', 'remove', 'edit', 'enrich', 'dir', 'promote'] as const
 
 export type StoreSubcommand = (typeof STORE_SUBCOMMANDS)[number]
 
@@ -82,6 +85,8 @@ export interface ParsedStoreCommand {
   readonly ids: readonly string[]
   readonly all: boolean
   readonly yes: boolean
+  readonly manual: boolean
+  readonly reason: string
 }
 
 function tokenize(raw: string): string[] {
@@ -129,6 +134,24 @@ function decodeIdsPayload(payload: string): string[] | { readonly error: string 
   }
 }
 
+/**
+ * A reason typed by a person contains spaces, so the panel sends it through
+ * `encodeFlag` like every other free text. The host still accepts a bare value
+ * for the slash command: anything that is not base64url-encoded JSON stays as
+ * written.
+ */
+function decodeReasonPayload(value: string): string {
+  if (value === '') return ''
+  try {
+    const text = Buffer.from(value, 'base64url').toString('utf8')
+    if (!text.startsWith('"')) return value
+    const parsed: unknown = JSON.parse(text)
+    return typeof parsed === 'string' ? parsed : value
+  } catch {
+    return value
+  }
+}
+
 export function parseStoreCommand(raw: string): ParsedStoreCommand | { readonly error: string } {
   const trimmed = raw.trim()
   const sub = /^([a-z]+)/u.exec(trimmed)?.[1] ?? ''
@@ -154,6 +177,8 @@ export function parseStoreCommand(raw: string): ParsedStoreCommand | { readonly 
     ids: [],
     all: false,
     yes: false,
+    manual: false,
+    reason: '',
   }
   const out: { -readonly [K in keyof ParsedStoreCommand]: ParsedStoreCommand[K] } = { ...parsed }
   const targets: string[] = []
@@ -190,6 +215,15 @@ export function parseStoreCommand(raw: string): ParsedStoreCommand | { readonly 
     }
     if (token === '--yes') {
       out.yes = true
+      continue
+    }
+    if (token === '--manual') {
+      out.manual = true
+      continue
+    }
+    const reason = /^--reason=(.*)$/u.exec(token)
+    if (reason) {
+      out.reason = reason[1] ?? ''
       continue
     }
     const payload = /^--payload=(.*)$/u.exec(token)
@@ -251,8 +285,8 @@ export function parseStoreCommand(raw: string): ParsedStoreCommand | { readonly 
   }
   if (out.chooseDir && sub !== 'export') return { error: '--choose-dir is valid only for export' }
   if (out.chooseDir && out.out !== '') return { error: '--choose-dir cannot be combined with --out' }
-  if (out.ids.length > 0 && sub !== 'export' && sub !== 'edit') {
-    return { error: '--ids is valid only for export or edit' }
+  if (out.ids.length > 0 && sub !== 'export' && sub !== 'edit' && sub !== 'promote') {
+    return { error: '--ids is valid only for export, edit or promote' }
   }
   if (out.ids.length > 0 && out.all) return { error: '--ids cannot be combined with --all' }
   if ((out.dirChoose || out.dirClear || out.dirPath !== '') && sub !== 'dir') {
@@ -297,6 +331,16 @@ export function parseStoreCommand(raw: string): ParsedStoreCommand | { readonly 
     }
     return out
   }
+  if (sub === 'promote') {
+    if (out.manual !== (out.reason !== '')) {
+      return { error: 'promote --manual requires a non-empty --reason=<text>; --reason is valid only with --manual' }
+    }
+    if (out.all || targets.length > 0 || out.payload !== '' || out.json !== '' || out.out !== '' || out.quarantine || out.includeQuarantine || out.yes) {
+      return { error: 'promote takes only --ids, --manual and --reason=<text>' }
+    }
+    return out
+  }
+  if (out.manual || out.reason !== '') return { error: '--manual and --reason are valid only for promote' }
   if (out.yes) return { error: '--yes is valid only for remove --all' }
   if (out.all && sub !== 'export') return { error: '--all is valid only for export or remove' }
   if (out.limit < 1 || out.limit > 500) return { error: '--limit must be between 1 and 500' }
@@ -407,6 +451,8 @@ export interface SaveResult extends StoreCommandResult {
   readonly id?: string
   readonly quarantined?: boolean
   readonly count?: number
+  /** Why nothing was written, when the work was already present. */
+  readonly reason?: string
   /** The record as written, so callers can mirror its fields (panel snapshots). */
   readonly reference?: StoredReference
 }
@@ -462,18 +508,37 @@ export async function saveFromPayload(
       }
     }
     const next = await saveQuarantined(deps.workspace, stored, { now })
+    if (!next.stored) {
+      // The same work is already in the library under another id (often after a
+      // manual confirmation). Reporting success keeps the batch from claiming a
+      // ⚠ copy that does not exist on disk.
+      return {
+        kind: 'success',
+        status: verification.status,
+        id: stored.id,
+        quarantined: false,
+        reference: stored,
+        reason: 'already in the library',
+        count: next.state.entries.length,
+        text: [
+          `already in the library ${stored.id}; nothing added to refs/quarantine.json`,
+          `verification: ${verification.status}${verification.passed !== undefined ? ` ${String(verification.passed)}/3` : ''}`,
+          'This work is in refs/refs.json under an equivalent identity, so no ⚠ copy was created.',
+        ].join('\n'),
+      }
+    }
     return {
       kind: 'success',
       status: verification.status,
       id: stored.id,
       quarantined: true,
       reference: stored,
-      count: next.entries.length,
+      count: next.state.entries.length,
       text: [
         `⚠ quarantined ${stored.id} → refs/quarantine.json`,
         `verification: ${verification.status}${verification.passed !== undefined ? ` ${String(verification.passed)}/3` : ''}${verification.reasons && verification.reasons.length > 0 ? ` · ${verification.reasons.join(', ')}` : ''}`,
         KEPT_OUT,
-        `quarantine: ${String(next.entries.length)} entr${next.entries.length === 1 ? 'y' : 'ies'}`,
+        `quarantine: ${String(next.state.entries.length)} entr${next.state.entries.length === 1 ? 'y' : 'ies'}`,
       ].join('\n'),
     }
   } catch (error) {
@@ -509,6 +574,7 @@ interface ExportScope {
   /** How many references the library holds, for the "N of M" line. */
   readonly total: number
   readonly quarantined: number
+  readonly duplicates: number
   /** Human description of what was selected. */
   readonly label: string
 }
@@ -558,39 +624,44 @@ async function resolveExportScope(
 ): Promise<ExportScope> {
   const main = [...(await loadStore(workspace, { now })).state.references]
   const quarantine = await loadQuarantine(workspace, { now })
-  if (ids.length > 0) {
-    // An explicit selection is the tick-box list from the panel: it may name
-    // quarantined entries, which is why the quarantine table joins the pool.
-    const wanted = new Set(ids)
-    const refs = [...main, ...quarantine.entries].filter((ref) => wanted.has(ref.id))
-    const quarantined = refs.filter((ref) => quarantine.entries.some((entry) => entry.id === ref.id)).length
-    return {
-      refs,
-      total: main.length + quarantine.entries.length,
-      quarantined,
-      label: 'your selection',
+  const dedupe = (items: readonly StoredReference[]) => {
+    const seen = new Set<string>()
+    const kept: StoredReference[] = []
+    let duplicates = 0
+    for (const ref of items) {
+      const key = referenceIdentityKey(ref)
+      if (seen.has(key)) { duplicates += 1; continue }
+      seen.add(key); kept.push(ref)
     }
+    return { refs: kept, duplicates }
+  }
+  if (ids.length > 0) {
+    const wanted = new Set(ids)
+    const rawPool = [...main, ...quarantine.entries]
+    const selectedKeys = new Set(rawPool.filter((ref) => wanted.has(ref.id)).map(referenceIdentityKey))
+    const pool = dedupe(rawPool).refs
+    const refs = pool.filter((ref) => selectedKeys.has(referenceIdentityKey(ref)))
+    const quarantined = refs.filter((ref) => quarantine.entries.some((entry) => entry.id === ref.id)).length
+    return { refs, total: pool.length, quarantined, duplicates: main.length + quarantine.entries.length - pool.length, label: 'your selection' }
   }
 
-  let refs = main
-  let quarantined = 0
-  if (includeQuarantine) {
-    quarantined = quarantine.entries.length
-    refs = [...refs, ...quarantine.entries]
-  }
+  const merged = includeQuarantine ? [...main, ...quarantine.entries] : main
+  const { refs: uniqueRefs, duplicates } = dedupe(merged)
+  let refs = uniqueRefs
+  const quarantined = refs.filter((ref) => quarantine.entries.some((entry) => entry.id === ref.id)).length
   const total = refs.length
-  if (all) return { refs, total, quarantined, label: 'whole library' }
+  if (all) return { refs, total, quarantined, duplicates, label: 'whole library' }
 
   const batch: CaptureBatch | undefined = await readBatch(workspace)
   if (batch === undefined) {
-    return { refs, total, quarantined, label: 'whole library (no capture recorded yet)' }
+    return { refs, total, quarantined, duplicates, label: 'whole library (no capture recorded yet)' }
   }
   const selected = new Set(exportableOf(batch, includeQuarantine))
   const picked = refs.filter((ref) => selected.has(ref.id))
   if (picked.length === 0) {
-    return { refs, total, quarantined, label: 'whole library (the last capture stored nothing exportable)' }
+    return { refs: [], total, quarantined, duplicates, label: 'the last capture stored nothing exportable; use --all to export the library' }
   }
-  return { refs: picked, total, quarantined, label: 'the last capture' }
+  return { refs: picked, total, quarantined, duplicates, label: 'the last capture' }
 }
 
 export interface ExportOptions {
@@ -601,6 +672,28 @@ export interface ExportOptions {
   readonly ids?: readonly string[]
   /** Export the whole library instead of the last capture batch. */
   readonly all?: boolean
+}
+
+/**
+ * Two exports inside the same minute would otherwise write the same
+ * `refs-<stamp>.bib`, and the sandbox refuses to replace a file it was not
+ * asked to overwrite. Number the later ones instead of failing.
+ */
+function freeName(dir: string, stem: string, ext: string, taken: (path: string) => boolean): string {
+ for (let n = 1; n <= 99; n += 1) {
+    const path = join(dir, n === 1 ? `${stem}.${ext}` : `${stem}-${String(n)}.${ext}`)
+    if (!taken(path)) return path
+  }
+  return join(dir, `${stem}-${String(Date.now())}.${ext}`)
+}
+
+/**
+ * The sandbox refuses to replace an existing file unless the caller read it
+ * first; a same-minute second export trips exactly that error.
+ */
+function isOverwriteRefusal(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /cannot overwrite existing|already exists|EEXIST/i.test(message)
 }
 
 /** Render and write the library. Shared by `/refs export` and `ref_export`. */
@@ -642,6 +735,15 @@ export async function exportLibrary(
   const refs = [...scope.refs]
   const quarantined = scope.quarantined
   if (refs.length === 0) {
+    // An empty *scope* is not an empty library: the last capture may have stored
+    // nothing that is still here. Say which one it is, because "library is empty"
+    // sends the user looking for a bug that is not there.
+    if (scope.label.startsWith('the last capture stored nothing exportable')) {
+      return {
+        kind: 'success',
+        text: 'nothing from the last capture is still in the library, so there is nothing to export for it; `/refs export --all` writes the whole library.',
+      }
+    }
     // Nothing to export is a normal state, not a failure: capture only produces
     // candidates, so an empty library is the expected first-run outcome.
     return {
@@ -655,11 +757,14 @@ export async function exportLibrary(
   const formats: ExportFormat[] =
     parsed.format === 'both' ? ['bibtex', 'ris'] : [parsed.format]
   const written: string[] = []
+  const stem = `refs-${stamp(now)}`
   for (const format of formats) {
     const target =
       parsed.out !== ''
         ? parsed.out
-        : join('refs', 'exports', `refs-${stamp(now)}.${EXPORT_EXTENSIONS[format]}`)
+        : freeName(join('refs', 'exports'), stem, EXPORT_EXTENSIONS[format], (candidate) =>
+            existsSync(insideWorkspace(deps.workspace, candidate)),
+          )
     const full = insideWorkspace(deps.workspace, target)
     const text = renderExport(format, refs)
     await writeFileAtomic(full, text)
@@ -669,6 +774,7 @@ export async function exportLibrary(
     kind: 'success',
     text: [
       `exported ${String(refs.length)} of ${String(scope.total)} reference(s) — ${scope.label}${quarantined > 0 ? `, including ${String(quarantined)} quarantined` : ''}`,
+      ...(scope.duplicates > 0 ? [`${String(scope.duplicates)} duplicate(s) skipped`] : []),
       ...(scope.label === 'the last capture' ? ['  (the whole library is `/refs export --all`)'] : []),
       ...written.map((line) => `  ${line}`),
     ].join('\n'),
@@ -701,6 +807,12 @@ async function exportToChosenDirectory(
   const refs = [...scope.refs]
   const quarantined = scope.quarantined
   if (refs.length === 0) {
+    if (scope.label.startsWith('the last capture stored nothing exportable')) {
+      return {
+        kind: 'success',
+        text: 'nothing from the last capture is still in the library, so there is nothing to export for it; `/refs export --all` writes the whole library.',
+      }
+    }
     return {
       kind: 'success',
       text: options.includeQuarantine
@@ -748,18 +860,36 @@ async function exportToChosenDirectory(
       }
     }
     const sandboxPolicy: SandboxPolicyLike = { mode: 'workspace-write', workspaceRoot: deps.workspace }
+    const stem = `refs-${stamp(now)}`
     for (const format of formats) {
-      const filename = `refs-${stamp(now)}.${EXPORT_EXTENSIONS[format]}`
-      let filePath = join(canonicalDirectory, filename)
-      try {
-        const fileTarget = await fs.resolve(filePath, { signal })
-        filePath = fs.processPath(fileTarget)
-        const content = renderExport(format, refs)
-        await fs.writeText(fileTarget, content, { kind: 'createIfAbsent' }, signal, sandboxPolicy)
-        written.push(filePath)
-      } catch (error) {
-        failures.push(`${filePath}: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`)
+      const extension = EXPORT_EXTENSIONS[format]
+      const content = renderExport(format, refs)
+      let written_ = ''
+      // Two exports inside the same minute produce the same file name, and the
+      // sandbox refuses to replace a file it was not asked to overwrite. Retry
+      // with a numbered name instead of surfacing that as an export failure.
+      for (let n = 1; n <= 20; n += 1) {
+        const candidate = join(
+          canonicalDirectory,
+          n === 1 ? `${stem}.${extension}` : `${stem}-${String(n)}.${extension}`,
+        )
+        // A path-resolution failure is reported for this file and must not take
+        // the files written before it with it.
+        let filePath = candidate
+        try {
+          const fileTarget = await fs.resolve(candidate, { signal })
+          filePath = fs.processPath(fileTarget)
+          await fs.writeText(fileTarget, content, { kind: 'createIfAbsent' }, signal, sandboxPolicy)
+          written_ = filePath
+          break
+        } catch (error) {
+          if (!isOverwriteRefusal(error) || n === 20) {
+            failures.push(`${filePath}: ${error instanceof Error ? `${error.name}: ${error.message}` : String(error)}`)
+            break
+          }
+        }
       }
+      if (written_ !== '') written.push(written_)
     }
   } catch (error) {
     return {
@@ -1036,16 +1166,31 @@ export async function removeReferences(
     }
   }
 
+  // Removing from the main table must not leave a quarantine copy of the same
+  // work behind: it would reappear under --include-quarantine as a "duplicate".
+  const removedIdentities = new Set(
+    before
+      .filter((ref) => options.all === true || targets.some((target) => matchesTarget(ref, target)))
+      .map((ref) => referenceIdentityKey(ref)),
+  )
+  let alsoDropped = 0
   if (quarantine) {
     await writeQuarantine(deps.workspace, { schemaVersion: SCHEMA_VERSION, updatedAt: now, entries: kept })
   } else {
     await writeStore(deps.workspace, { schemaVersion: SCHEMA_VERSION, updatedAt: now, references: kept })
+    const stale = await loadQuarantine(deps.workspace, { now })
+    const remaining = stale.entries.filter((ref) => !removedIdentities.has(referenceIdentityKey(ref)))
+    alsoDropped = stale.entries.length - remaining.length
+    if (alsoDropped > 0) {
+      await writeQuarantine(deps.workspace, { schemaVersion: SCHEMA_VERSION, updatedAt: now, entries: remaining })
+    }
   }
 
   const lines = [
     `removed ${String(removed)} of ${String(before.length)} entr${before.length === 1 ? 'y' : 'ies'} from ${table}`,
     `remaining: ${String(kept.length)}`,
     ...(missing.length > 0 ? [`unmatched: ${missing.join(', ')}`] : []),
+    ...(alsoDropped > 0 ? [`also dropped ${String(alsoDropped)} quarantined duplicate(s) of the same work`] : []),
   ]
   return { kind: 'success', text: lines.join('\n') }
 }
@@ -1088,21 +1233,15 @@ const EDITABLE_TEXT = [
  * capture) got wrong, so the record keeps its table and its verification status
  * and the exporters simply write the corrected fields.
  */
-export async function editReference(
-  request: EditRequest,
-  deps: StoreCommandDeps,
-): Promise<StoreCommandResult> {
-  const now = deps.now?.() ?? new Date().toISOString()
-  const store = await loadStore(deps.workspace, { now })
-  const quarantine = await loadQuarantine(deps.workspace, { now })
-  const inMain = store.state.references.find((ref) => ref.id === request.id)
-  const inQuarantine = quarantine.entries.find((ref) => ref.id === request.id)
-  const current = inMain ?? inQuarantine
-  if (current === undefined) {
-    return { kind: 'error', text: `no reference with id "${request.id}" in either table` }
-  }
-
-  const patch = request.patch
+/**
+ * Apply one patch to one record. Shared by the edit path so a duplicate copy in
+ * the other table receives exactly the same correction.
+ */
+function applyPatch(
+  current: StoredReference,
+  patch: Record<string, unknown>,
+  now: string,
+): { next: StoredReference; changed: string[] } {
   const changed: string[] = []
   const next: { -readonly [K in keyof StoredReference]: StoredReference[K] } = { ...current }
 
@@ -1145,25 +1284,79 @@ export async function editReference(
     changed.push('doi/arxiv')
   }
   next.updatedAt = now
+  return { next: { ...next }, changed }
+}
 
-  if (changed.length === 0) {
-    return { kind: 'error', text: 'nothing to change: the payload carried no known field' }
+/**
+ * Correct one entry's metadata in place.
+ *
+ * Editing is not re-verification: the user is fixing what the registry (or the
+ * capture) got wrong, so the record keeps its table and its verification status
+ * and the exporters simply write the corrected fields.
+ *
+ * The same work may still exist in both tables (legacy data, or a capture that
+ * failed once and succeeded later). The patch is applied to every copy sharing
+ * the pre-edit identity, so fix/edit cannot leave the two tables disagreeing.
+ */
+export async function editReference(
+  request: EditRequest,
+  deps: StoreCommandDeps,
+): Promise<StoreCommandResult> {
+  const now = deps.now?.() ?? new Date().toISOString()
+  const store = await loadStore(deps.workspace, { now })
+  const quarantine = await loadQuarantine(deps.workspace, { now })
+  const inMain = store.state.references.find((ref) => ref.id === request.id)
+  const inQuarantine = quarantine.entries.find((ref) => ref.id === request.id)
+  const current = inMain ?? inQuarantine
+  if (current === undefined) {
+    return { kind: 'error', text: `no reference with id "${request.id}" in either table` }
   }
 
-  const edited: StoredReference = { ...next }
+  // Identity is read before the patch: correcting a DOI changes the key, and the
+  // duplicate in the other table still carries the old one.
+  const identityBefore = referenceIdentityKey(current)
+  const applied = applyPatch(current, request.patch, now)
+  if (applied.changed.length === 0) {
+    return { kind: 'error', text: 'nothing to change: the payload carried no known field' }
+  }
+  const edited = applied.next
+  let synced = 0
+
   if (inMain !== undefined) {
     const references = store.state.references.map((ref) => (ref.id === edited.id ? edited : ref))
     await writeStore(deps.workspace, { ...store.state, updatedAt: now, references })
+    // Same identity means the same work, even when the two tables happen to hold
+    // the same id (that is exactly the duplicate case this is here to fix).
+    const dupes = quarantine.entries.filter((ref) => referenceIdentityKey(ref) === identityBefore)
+    if (dupes.length > 0) {
+      const entries = quarantine.entries.map((ref) =>
+        referenceIdentityKey(ref) === identityBefore ? applyPatch(ref, request.patch, now).next : ref,
+      )
+      await writeQuarantine(deps.workspace, { ...quarantine, updatedAt: now, entries })
+      synced = dupes.length
+    }
   } else {
     const entries = quarantine.entries.map((ref) => (ref.id === edited.id ? edited : ref))
     await writeQuarantine(deps.workspace, { ...quarantine, updatedAt: now, entries })
+    const dupes = store.state.references.filter((ref) => referenceIdentityKey(ref) === identityBefore)
+    if (dupes.length > 0) {
+      const references = store.state.references.map((ref) =>
+        referenceIdentityKey(ref) === identityBefore ? applyPatch(ref, request.patch, now).next : ref,
+      )
+      await writeStore(deps.workspace, { ...store.state, updatedAt: now, references })
+      synced = dupes.length
+    }
   }
+
   return {
     kind: 'success',
     text: [
       `edited ${edited.id} → refs/${inMain === undefined ? 'quarantine.json' : 'refs.json'}`,
-      `fields: ${changed.join(', ')}`,
+      `fields: ${applied.changed.join(', ')}`,
       `title: ${edited.title}`,
+      ...(synced > 0
+        ? [`also updated ${String(synced)} duplicate copy/copies in ${inMain === undefined ? 'refs/refs.json' : 'refs/quarantine.json'}`]
+        : []),
     ].join('\n'),
   }
 }
@@ -1361,6 +1554,69 @@ export async function runStoreCommand(
     }
     if (parsed.sub === 'enrich') {
       return await enrichReferences({ quarantine: parsed.quarantine }, deps)
+    }
+    if (parsed.sub === 'promote') {
+      const now = deps.now?.() ?? new Date().toISOString()
+      const quarantine = await loadQuarantine(deps.workspace, { now })
+      // A row already confirmed into the library is the most common reason a
+      // panel button looks broken: report that before demanding a verifier.
+      if (parsed.ids.length > 0 && quarantine.entries.every((ref) => !parsed.ids.includes(ref.id))) {
+        const library = await loadStore(deps.workspace, { now })
+        const inLibrary = parsed.ids.filter((id) => library.state.references.some((ref) => ref.id === id))
+        if (inLibrary.length > 0) {
+          return {
+            kind: 'success',
+            text: [
+              `already in the library: ${inLibrary.join(', ')}`,
+              'It is in refs/refs.json, so there is nothing to re-verify. The ⚠ in the list is the status this entry had when it was captured; the next capture records it as saved.',
+            ].join('\n'),
+          }
+        }
+      }
+      if (!parsed.manual && deps.verify === undefined) {
+        return { kind: 'error', text: 'promote requires the live verifier; no entries were changed' }
+      }
+      // The panel confirms one row at a time, so promote has to accept a scope.
+      // Without --ids it still means "every quarantined entry".
+      const requested = parsed.ids.length > 0 ? new Set(parsed.ids) : undefined
+      const pool =
+        requested === undefined
+          ? quarantine.entries
+          : quarantine.entries.filter((ref) => requested.has(ref.id))
+      if (requested !== undefined && pool.length === 0) {
+        return { kind: 'error', text: 'none of those ids are in quarantine; no entries were changed' }
+      }
+      const reason = decodeReasonPayload(parsed.reason)
+      const candidates: StoredReference[] = []
+      const rejected: string[] = []
+      for (const ref of pool) {
+        if (parsed.manual) {
+          // Keep what quarantine said, so a manual promotion can still be
+          // audited later: the new note explains who confirmed it and what the
+          // automatic check had objected to.
+          const previous = (ref.verification.reasons ?? []).join(', ') || 'quarantined without a stated reason'
+          const note =
+            reason === '' ? `manual promotion; originally: ${previous}` : `${reason}; originally: ${previous}`
+          candidates.push({ ...ref, verification: { status: 'manual', checkedAt: now, note } })
+          continue
+        }
+        const report = await deps.verify?.(ref)
+        if (report?.status === 'verified') {
+          candidates.push({ ...ref, verification: verificationOf(ref, report, now) })
+        } else {
+          rejected.push(ref.id)
+        }
+      }
+      const result = await promoteQuarantined(deps.workspace, candidates, { now })
+      const scope =
+        requested === undefined
+          ? `${String(quarantine.entries.length)} quarantined reference(s)`
+          : `${String(pool.length)} selected of ${String(quarantine.entries.length)} quarantined`
+      const lines = [`promoted ${String(result.promoted.length)} of ${scope}`]
+      if (result.replaced > 0) lines.push(`${String(result.replaced)} replaced an existing entry`)
+      if (result.skipped > 0) lines.push(`${String(result.skipped)} no longer in quarantine`)
+      if (rejected.length > 0) lines.push(`still quarantined (did not verify): ${rejected.join(', ')}`)
+      return { kind: 'success', text: lines.join('\n') }
     }
     if (parsed.sub === 'dir') {
       let path: string | undefined

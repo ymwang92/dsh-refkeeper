@@ -11,6 +11,7 @@ import {
   emptyQuarantine,
   emptyStore,
   referenceId,
+  referenceIdentityKey,
   sortReferences,
 } from './types.ts'
 import type {
@@ -326,7 +327,8 @@ export async function saveReference(
   return serialize(`store:${paths.dir}`, () =>
     withStoreLock(paths.dir, async () => {
       const { state } = await loadStore(workspace, { now })
-      const existing = state.references.find((ref) => ref.id === input.id)
+      const identity = referenceIdentityKey(input)
+      const existing = state.references.find((ref) => referenceIdentityKey(ref) === identity)
       if (!existing && state.references.length >= max) {
         throw new StoreError(
           'capacity',
@@ -334,33 +336,123 @@ export async function saveReference(
         )
       }
       const merged: StoredReference = existing
-        ? { ...input, addedAt: existing.addedAt, updatedAt: now }
+        ? { ...input, id: existing.id, annotation: input.annotation ?? existing.annotation, addedAt: existing.addedAt, updatedAt: now }
         : { ...input, addedAt: input.addedAt || now, updatedAt: now }
       const references = sortReferences([
-        ...state.references.filter((ref) => ref.id !== merged.id),
+        ...state.references.filter((ref) => referenceIdentityKey(ref) !== identity),
         merged,
       ])
       const next: StoreState = { schemaVersion: SCHEMA_VERSION, updatedAt: now, references }
       await writeStore(workspace, next)
+      // A successful capture supersedes any stale quarantine copy of the same id.
+      // Write the main table first so an interruption cannot lose the only copy.
+      const quarantine = await loadQuarantine(workspace, { now })
+      const remaining = quarantine.entries.filter((ref) => referenceIdentityKey(ref) !== identity)
+      if (remaining.length !== quarantine.entries.length) {
+        await writeQuarantine(workspace, {
+          schemaVersion: SCHEMA_VERSION,
+          updatedAt: now,
+          entries: remaining,
+        })
+      }
       return { reference: merged, state: next, replaced: Boolean(existing) }
     }),
   )
+}
+
+export interface QuarantineSave {
+  readonly state: QuarantineState
+  /** False when the same work is already in the main table and nothing was written. */
+  readonly stored: boolean
 }
 
 export async function saveQuarantined(
   workspace: string,
   input: StoredReference,
   options: { readonly now?: string } = {},
-): Promise<QuarantineState> {
+): Promise<QuarantineSave> {
   const now = options.now ?? new Date().toISOString()
   const paths = storePaths(workspace)
   return serialize(`store:${paths.dir}`, () =>
     withStoreLock(paths.dir, async () => {
-      const current = await loadQuarantine(workspace, { now })
-      const entries = [input, ...current.entries.filter((ref) => ref.id !== input.id)]
+      const [main, current] = await Promise.all([
+        loadStore(workspace, { now }),
+        loadQuarantine(workspace, { now }),
+      ])
+      // Never re-create a quarantine copy once the same identity is in the main table.
+      const identity = referenceIdentityKey(input)
+      if (main.state.references.some((ref) => referenceIdentityKey(ref) === identity)) {
+        return { state: current, stored: false }
+      }
+      const prior = current.entries.find((ref) => referenceIdentityKey(ref) === identity)
+      const incoming = prior === undefined ? input : { ...input, verification: { ...input.verification, reasons: [...new Set([...(input.verification.reasons ?? []), ...(prior.verification.reasons ?? [])])] } }
+      const entries = [incoming, ...current.entries.filter((ref) => referenceIdentityKey(ref) !== identity)]
       const next: QuarantineState = { schemaVersion: SCHEMA_VERSION, updatedAt: now, entries }
       await writeQuarantine(workspace, next)
-      return next
+      return { state: next, stored: true }
+    }),
+  )
+}
+
+/**
+ * Move selected quarantine rows into the main table under one process and disk lock.
+ * The main table is written before removing quarantine rows: an interrupted move
+ * can leave a duplicate, but never lose the only copy. Retrying deduplicates by id.
+ */
+export async function promoteQuarantined(
+  workspace: string,
+  candidates: readonly StoredReference[],
+  options: { readonly now?: string; readonly max?: number } = {},
+): Promise<{ readonly promoted: readonly StoredReference[]; readonly skipped: number; readonly replaced: number }> {
+  const now = options.now ?? new Date().toISOString()
+  const max = options.max ?? DEFAULT_MAX_REFERENCES
+  const paths = storePaths(workspace)
+  return serialize(`store:${paths.dir}`, () =>
+    withStoreLock(paths.dir, async () => {
+      const [main, quarantine] = await Promise.all([
+        loadStore(workspace, { now }),
+        loadQuarantine(workspace, { now }),
+      ])
+      const quarantineById = new Map(quarantine.entries.map((ref) => [ref.id, ref]))
+      const selected = candidates
+        .map((candidate) => quarantineById.get(candidate.id))
+        .filter((ref): ref is StoredReference => ref !== undefined)
+      const existingById = new Map(main.state.references.map((ref) => [ref.id, ref]))
+      const incoming = selected.map((ref) => {
+        const candidate = candidates.find((item) => item.id === ref.id) ?? ref
+        const previous = existingById.get(ref.id)
+        // A promoted id already present in the main table has to replace that row.
+        // Filtering it out while still deleting the quarantine row would keep the
+        // stale record and lose the fresh verification, which is exactly what a
+        // retry after an interrupted move runs into.
+        return previous === undefined ? candidate : { ...candidate, annotation: candidate.annotation ?? previous.annotation }
+      })
+      const additions = incoming.filter((ref) => !existingById.has(ref.id))
+      const replaced = incoming.length - additions.length
+      if (main.state.references.length + additions.length > max) {
+        throw new StoreError(
+          'capacity',
+          `refs store holds ${String(main.state.references.length)} references (limit ${String(max)}); export and archive before promoting more.`,
+        )
+      }
+      if (selected.length === 0) return { promoted: [], skipped: candidates.length, replaced: 0 }
+      const selectedIds = new Set(selected.map((ref) => ref.id))
+      const nextMain: StoreState = {
+        schemaVersion: SCHEMA_VERSION,
+        updatedAt: now,
+        references: sortReferences([
+          ...main.state.references.filter((ref) => !selectedIds.has(ref.id)),
+          ...incoming,
+        ]),
+      }
+      await writeStore(workspace, nextMain)
+      const nextQuarantine: QuarantineState = {
+        schemaVersion: SCHEMA_VERSION,
+        updatedAt: now,
+        entries: quarantine.entries.filter((ref) => !selectedIds.has(ref.id)),
+      }
+      await writeQuarantine(workspace, nextQuarantine)
+      return { promoted: incoming, skipped: candidates.length - selected.length, replaced }
     }),
   )
 }

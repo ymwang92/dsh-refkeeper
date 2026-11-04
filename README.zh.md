@@ -147,6 +147,7 @@ GB/T 7714 格式的参考文献行与 APA、IEEE 一起解析。中文标题按�
 | 核对一条 | `/refs verify --doi=10.1002/joc.1688` |
 | 查看文献库 | `/refs list [--quarantine]` |
 | 补齐卷、页码、出版社 | `/refs enrich [--quarantine]` |
+| 提升已核验的隔离条目 | `/refs promote [--ids=<payload>]` 或 `/refs promote --manual --reason=<text>` |
 | 修改一个字段 | `/refs edit --id=<id> --payload=<base64url(json)>` |
 | 删除条目 | `/refs remove <id\|doi\|arxiv>...` 或 `/refs remove --all --yes` |
 | 导出 | `/refs export [--format=bibtex\|ris\|both] [--all] [--ids=...] [--out=path]` |
@@ -163,6 +164,7 @@ GB/T 7714 格式的参考文献行与 APA、IEEE 一起解析。中文标题按�
 /refs list [--limit=N] [--quarantine]
 /refs edit --id=<id> --payload=<base64url(json)>
 /refs enrich [--quarantine]
+/refs promote [--ids=<payload>] [--manual --reason=<text>]
 /refs remove <id|doi|arxiv>... [--quarantine]
 /refs remove --all --yes [--quarantine]
 /refs export [--format=bibtex|ris|both] [--out=path] [--include-quarantine]
@@ -170,8 +172,14 @@ GB/T 7714 格式的参考文献行与 APA、IEEE 一起解析。中文标题按�
 /refs dir [--set=<base64url(path)>|--clear]
 ```
 
+`/refs promote` 会通过实时注册表重新核验隔离区条目，只迁移状态为 `verified` 的条目。`--ids` 把范围收窄到面板里勾选的那几条，隔离行上的两个按钮就是发它：`重新核验` 走实时校验，`人工确认入表` 直接迁入并记下 `manual` 状态与理由。若迁入的条目主表里已有同一条，会用新结果替换旧行，而不是留下旧记录。
+
 不带 `--save` 时，`/refs capture` 只预览候选。导出默认只导最近一次捕获，加 `--all`
 导出整个库。较长的 id 用 base64url 传输，因为真实 id 里含空格、`<>`、`;` 和括号。
+
+同一篇文献不会在两处各存一份：先因故障进隔离区、后来捕获成功的条目会按身份
+（DOI、arXiv id、ISBN 或标题加年份）合并成一条；`remove` 与 `edit` 会同时作用于
+两张表，避免旧副本在 `--include-quarantine` 导出时重新出现。
 
 </details>
 
@@ -222,6 +230,10 @@ npm run build     # 先用 tsdown 打包宿主，再打客户端 bundle
 ```
 
 `tsdown` 会清空 `lib/`，所以客户端 bundle 要在它之后执行。需要 Node 22 或更高版本。
+
+## 更新记录
+
+每个版本改了什么、为什么改，记在 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 许可
 

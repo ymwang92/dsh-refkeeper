@@ -949,7 +949,7 @@ function mount(ctx: Context) {
             name: 'refs',
             description: 'Capture, verify, store and export references for this workspace',
             input: {
-              hint: '[status|capture|verify|save|list|export|dir] …',
+              hint: '[status|capture|verify|save|list|export|dir|promote] …',
             },
             handler: async (invocation) => {
               const raw = invocation.rawInput.trim()

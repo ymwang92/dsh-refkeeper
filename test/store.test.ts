@@ -87,13 +87,30 @@ describe('store round trip', () => {
 
   it('routes quarantined entries to their own file', async () => {
     await saveReference(workspace, ref(), { now: NOW })
-    await saveQuarantined(workspace, ref({ title: 'Unverified note' }), { now: NOW })
+    await saveQuarantined(workspace, ref({ title: 'Unverified note', identifiers: { doi: '10.1000/unverified-note' } }), { now: NOW })
 
     const main = await loadStore(workspace, { now: NOW })
     expect(main.state.references).toHaveLength(1)
     const quarantine = await loadQuarantine(workspace, { now: NOW })
     expect(quarantine.entries).toHaveLength(1)
     expect(quarantine.entries[0]?.title).toBe('Unverified note')
+  })
+
+  it('removes a stale quarantine copy when a later verified save succeeds', async () => {
+    const stale = ref({ verification: { status: 'unverified', checkedAt: NOW } })
+    await saveQuarantined(workspace, stale, { now: NOW })
+    await saveReference(workspace, ref({ verification: { status: 'verified', checkedAt: NOW } }), { now: NOW })
+
+    expect((await loadStore(workspace, { now: NOW })).state.references).toHaveLength(1)
+    expect((await loadQuarantine(workspace, { now: NOW })).entries).toHaveLength(0)
+  })
+
+  it('does not add a quarantine copy when the identity already exists in main', async () => {
+    await saveReference(workspace, ref(), { now: NOW })
+    const outcome = await saveQuarantined(workspace, ref({ verification: { status: 'unverified', checkedAt: NOW } }), { now: NOW })
+    expect(outcome.stored).toBe(false)
+    expect(outcome.state.entries).toHaveLength(0)
+    expect((await loadQuarantine(workspace, { now: NOW })).entries).toHaveLength(0)
   })
 
   it('serialises concurrent writers instead of losing one', async () => {

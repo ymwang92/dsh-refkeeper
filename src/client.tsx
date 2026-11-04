@@ -118,6 +118,10 @@ interface Strings {
   readonly refresh: string
   /** Tooltip on the mark that says the model annotated this entry. */
   readonly annotated: string
+  /** Move a quarantined entry into the library after a fresh check. */
+  readonly promoteVerify: string
+  /** Move a quarantined entry in as manually accepted, no registry check. */
+  readonly promoteManual: string
   readonly statusSaved: string
   readonly statusQuarantined: string
   readonly statusSkipped: string
@@ -191,6 +195,8 @@ const EN: Strings = {
   batchEmpty: 'Nothing captured yet — the export buttons then fall back to the whole library.',
   refresh: 'Refresh list',
   annotated: 'annotated',
+  promoteVerify: 'Re-verify',
+  promoteManual: 'Store as manual',
   statusSaved: 'saved',
   statusQuarantined: '⚠ quarantined',
   statusSkipped: 'skipped',
@@ -264,6 +270,8 @@ const ZH: Strings = {
   batchEmpty: '还没有捕获记录；此时导出会退回整库。',
   refresh: '刷新列表',
   annotated: '已注解',
+  promoteVerify: '重新核验',
+  promoteManual: '人工确认入表',
   statusSaved: '已入表',
   statusQuarantined: '⚠ 隔离',
   statusSkipped: '跳过',
@@ -668,9 +676,10 @@ function BatchList(props: {
   readonly isPicked: (entry: BatchEntry) => boolean
   readonly onToggle: (id: string, next: boolean) => void
   readonly onEdit: (id: string, patch: Record<string, unknown>, title?: string) => void
+  readonly onPromote: (entry: BatchEntry, manual: boolean) => void
   readonly titleOf: (entry: BatchEntry) => string
 }): React.ReactElement {
-  const { batch, text, isPicked, onToggle, onEdit, titleOf } = props
+  const { batch, text, isPicked, onToggle, onEdit, onPromote, titleOf } = props
   if (batch === undefined) {
     return React.createElement('div', { style: { marginTop: '8px', opacity: 0.7 } }, text.batchEmpty)
   }
@@ -731,6 +740,24 @@ function BatchList(props: {
           ),
         ),
         React.createElement(EntryDetails, { entry, text, onSave: onEdit }),
+        // Only a quarantined row can move: verified rows are already in the
+        // library and skipped rows never became candidates.
+        entry.status === 'quarantined' && entry.id !== undefined
+          ? React.createElement(
+              'div',
+              { style: { display: 'flex', gap: '6px', padding: '0 0 8px 19px' } },
+              React.createElement(
+                'button',
+                { type: 'button', onClick: () => onPromote(entry, false) },
+                text.promoteVerify,
+              ),
+              React.createElement(
+                'button',
+                { type: 'button', onClick: () => onPromote(entry, true) },
+                text.promoteManual,
+              ),
+            )
+          : null,
       ),
     ),
   )
@@ -926,13 +953,26 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
   const titleOf = (entry: BatchEntry): string =>
     entry.id === undefined ? entry.title : titleOverrides[entry.id] ?? entry.title
   const onEdit = (id: string, patch: Record<string, unknown>, title?: string): void => {
-    const payload = encodeFlag('payload', JSON.stringify(patch))
-    run(`/refs edit --ids=${encodeFlag('ids', [id])} --payload=${payload}`)
+    // encodeFlag already returns `--ids=…` / `--payload=…`; prefixing it here
+    // produced `--ids=--ids=…` and the host decoded garbage.
+    run(`/refs edit ${encodeFlag('ids', [id])} ${encodeFlag('payload', patch)}`)
     if (title === undefined) return
     setEdits((previous) => {
       const titles = previous.key === batchKey ? previous.titles : {}
       return { key: batchKey, titles: { ...titles, [id]: title } }
     })
+  }
+
+  /**
+   * Default is a fresh check: it keeps the automatic gate meaningful and only
+   * asks for a person when the registries still disagree. The manual path
+   * records who decided and what quarantine had objected to.
+   */
+  const onPromote = (entry: BatchEntry, manual: boolean): void => {
+    if (entry.id === undefined) return
+    const parts = [encodeFlag('ids', [entry.id])]
+    if (manual) parts.push('--manual', encodeFlag('reason', `panel confirmation ${new Date().toISOString()}`))
+    run(`/refs promote ${parts.join(' ')}`)
   }
 
   if (!current.open) return null
@@ -1010,7 +1050,7 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
         : null,
       scopeOption('all', text.scopeAll),
     ),
-    React.createElement(BatchList, { batch, text, isPicked, onToggle, onEdit, titleOf }),
+    React.createElement(BatchList, { batch, text, isPicked, onToggle, onEdit, onPromote, titleOf }),
     React.createElement(
       'div',
       { style: { ...ROW_STYLE, marginTop: '4px', justifyContent: 'space-between', gap: '8px' } },
