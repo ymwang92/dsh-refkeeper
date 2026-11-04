@@ -17,6 +17,12 @@ If this plugin saves you time, a star on GitHub helps other people find it. If y
 - **Writes annotations.** After a capture, the model already running the session writes four short fields per entry: a summary, why the paper is relevant here, a supporting quote, and caveats. A quote that does not appear in the conversation is dropped.
 - **Exports.** BibTeX, RIS, or both. The export can cover the last capture, the entries you ticked, or the whole library.
 
+## One button in the composer
+
+The interface gains exactly one thing: an item in the composer's tool row, standing next to the work-mode and model pickers. It reads `❝ Refs` (Chinese UI: `❝ 引用`). There is no sidebar, no toolbar and no floating widget — press it and the capture panel opens above the composer, close it and the row is back to what it was.
+
+![The Refs button in the composer tool row](docs/images/composer.png)
+
 ## Why not just copy the citations by hand
 
 For three papers, copy by hand. Past that it is slow and easy to get wrong: one DOI sits in a tool result, an APA line sits in a summary, another paper is only mentioned by name two turns earlier.

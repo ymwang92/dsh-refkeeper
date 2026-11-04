@@ -48,7 +48,8 @@
     "LICENSE",
     "screenshots.json",
     "docs/images/panel.png",
-    "docs/images/panel-en.png"
+    "docs/images/panel-en.png",
+    "docs/images/composer.png"
   ],
   "scripts": {
     "build": "tsdown && node scripts/build-client.mjs",
