@@ -49,6 +49,7 @@
     "screenshots.json",
     "docs/images/panel.png",
     "docs/images/panel-en.png",
+    "docs/images/composer-en.png",
     "docs/images/composer.png"
   ],
   "scripts": {

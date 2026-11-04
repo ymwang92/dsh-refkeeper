@@ -21,7 +21,7 @@ If this plugin saves you time, a star on GitHub helps other people find it. If y
 
 The interface gains exactly one thing: an item in the composer's tool row, standing next to the work-mode and model pickers. It reads `❝ Refs` (Chinese UI: `❝ 引用`). There is no sidebar, no toolbar and no floating widget — press it and the capture panel opens above the composer, close it and the row is back to what it was.
 
-![The Refs button in the composer tool row](docs/images/composer.png)
+![The Refs button in the composer tool row](docs/images/composer-en.png)
 
 ## Why not just copy the citations by hand
 
