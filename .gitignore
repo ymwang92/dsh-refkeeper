@@ -6,6 +6,7 @@ coverage/
 .dsh-dev/
 .refkeeper/
 .e2e-workspace/
+.e2e-*.png
 refs/
 
 # never commit 2FA recovery codes

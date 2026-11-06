@@ -1,9 +1,9 @@
 /**
- * Author-list parsing shared by the composer panel.
+ * Author-list parsing shared by the capture panel and its tests.
  *
- * Kept out of `client.tsx` on purpose: it is pure text handling with no React
- * or DOM dependency, so it can be unit-tested by the normal vitest run (the
- * client bundle itself is only exercised through the GUI).
+ * This is pure text handling with no React or DOM dependency, so it can be
+ * unit-tested by the normal vitest run (the client bundle itself is exercised
+ * through the GUI).
  */
 
 const INITIALS = /^(?:[A-Za-z]\.){1,4}$/u
@@ -37,4 +37,22 @@ export function parseAuthors(raw: string): ParsedAuthor[] {
     authors.push({ family: token })
   }
   return authors
+}
+
+/** Format a parsed name as the host's accepted `Family, Given` text shape. */
+export function formatAuthor(author: ParsedAuthor): string {
+  return author.given === undefined || author.given === '' ? author.family : `${author.family}, ${author.given}`
+}
+
+/** `Surname, Initial` (repeatable) is the only unambiguous multi-author line shape. */
+const SEVERAL_AUTHORS = /^[^\n,]+,\s*(?:[A-Za-z]\.){1,4}(?:\s*,\s*[^\n,]+(?:\s*,\s*(?:[A-Za-z]\.){1,4})?)*$/u
+
+export function parseAuthorLines(text: string): string[] {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+    .flatMap((line) => (SEVERAL_AUTHORS.test(line) ? parseAuthors(line) : [{ family: line }]))
+    .map(formatAuthor)
+    .filter((author) => author !== '')
 }

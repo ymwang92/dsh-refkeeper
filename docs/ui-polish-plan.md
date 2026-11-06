@@ -18,7 +18,67 @@
 
 ---
 
-## 一、现状诊断
+## 〇之二、B1 验收结论（2026-11-05）
+
+**结论：有条件通过。** 六条静态门禁独立复跑全部通过（typecheck 0 error / 25 files 342 tests /
+build 通过 / `node --check` 通过 / `jsx-runtime`=0 / `choose`=0）；受保护目录与 `src/index.ts` 零改动；
+语义色变量名修正正确；经典 JSX 转换配置正确；i18n 键零缺失零冗余。
+
+**进 B2 前必须修掉 P1、P2。**
+
+### P1（真实回归，必须修）— 作者解析把多词 given 名拆坏
+
+B1 把 `patchOf` 的 authors 接到 `parseAuthorLines`，但 `parseAuthors` 会把**任何**非缩写 token
+当成新作者，于是宿主原本存对的多词 given 名被拆坏：
+
+| 输入 | B1 后实际落库 | 应为 |
+|---|---|---|
+| `Smith, John Paul` | `literal "Smith"` + `literal "John Paul"`（2 个作者） | `family "Smith"`, `given "John Paul"`（1 个作者） |
+| `Smith, John, Jr.` | 3 个 literal 作者 | `family "Smith"`, `given "John, Jr."`（1 个作者） |
+
+`Crossref` 的 given 常是「John Paul」这种多词形式，**这不是理论风险**。
+触发条件：用户改动了作者框（未改动时 `value === before`，不产生 patch）。
+
+**修法**：只在一行严格符合「`姓, 缩写`（可重复）」时才拆成多个作者，否则整行算一个作者。
+`parseAuthors` 本身不要动（现有单测依赖它的契约），只在 `parseAuthorLines` 的调用点加守卫：
+
+```ts
+/** `Surname, Initial`（可重复）——唯一能确定表示「一行多个作者」的形状。 */
+const SEVERAL_AUTHORS = /^[^\n,]+,\s*(?:[A-Za-z]\.){1,4}(?:\s*,\s*[^\n,]+(?:\s*,\s*(?:[A-Za-z]\.){1,4})?)*$/u
+
+export function parseAuthorLines(text: string): string[] {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+    .flatMap((line) => (SEVERAL_AUTHORS.test(line) ? parseAuthors(line) : [{ family: line }]))
+    .map(formatAuthor)
+    .filter((author) => author !== '')
+}
+```
+
+已实测：7 个典型输入下，仅 `Kucsko, G., Maurer, P.`（预期修复）与 `Kucsko, G., R.` 两项发生变化，
+其余 5 项与 B1 之前完全一致。须补单测覆盖上表两行 + `Daly, C.` + `van der Waals, J.` + `张伟`。
+
+### P2（悬空指令，建议同批修）— `detailsStale` 指向不存在的按钮
+
+文案让用户点「补全缺失字段」，但客户端从不发 `/refs enrich`，该按钮在界面上不存在
+（宿主有这条命令）。B1 之前就没有这个按钮 —— **非 B1 引入的回归**，但 B1 删掉 `enrich` 死键后，
+恢复按钮需要重新加键，属功能扩展，不在本次范围。
+
+**最小修法**：改 `detailsStale` 文案，去掉对不存在按钮的指引，只保留「重新捕获一次」这条路径。
+
+### P3（提示，非阻塞）
+
+`src/ui/tokens.ts` 目前只有文字色，没有徽章底色与间距层级。B2 做状态徽章时需补：
+
+- 四态底色：用 `color-mix(in srgb, <语义色> 14%, transparent)`，并保留一层不依赖 `color-mix` 的
+  `background` 兜底（老 Chromium 上由后者生效）。
+- `spacing` 需要 `xl`（16px）一档，用于分区之间的留白。
+
+---
+
+
 
 ### 1.1 结构性问题（截图可见）
 
@@ -295,8 +355,8 @@ external 列表保持 `['react', 'react-dom', 'react/jsx-runtime']` 不变也无
 | 批次 | 内容 | 为什么单独一批 |
 |---|---|---|
 | **B1** | 修 §1.2 语义色变量 + 抽 `tokens.ts` / `strings.ts` + 删死代码 + `authors.ts` 接线与 `formatAuthor` + esbuild 改经典转换 | 纯视觉与卫生改动，不动结构，风险最低，先把地基改对 |
-| **B2** | 列表视图重做：徽章 + 元信息副行 + `reason` 显示 + 刷新归位 + 选中计数 + 空态 + 「手动入表」按钮 | 面板里最常用的一块，独立可见 |
-| **B3** | 详情视图独立化：拆 `<details>` → 独立视图 + 三组字段 + 类型下拉 + 焦点管理 + `mode:'create'` 保存并入表 | 结构改动最大，依赖 B2 的行组件 |
+| **B2** | 列表视图重做：徽章 + 元信息副行 + `reason` 显示 + 刷新归位 + 选中计数 + 空态 + 「手动入表」按钮 | 面板里最常用的一块，独立可见。视觉目标见 `docs/ui-mockup.html` 左图 |
+| **B3** | 详情视图独立化：拆 `<details>` → 独立视图 + 三组字段 + 类型下拉 + 焦点管理 + `mode:'create'` 保存并入表 | 结构改动最大，依赖 B2 的行组件。视觉目标见 `docs/ui-mockup.html` 右图 |
 
 每批结束后跑 §6.1 全部门禁 + §6.2 的 V1–V5，截图留档，再进下一批。
 

@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>dsh-refkeeper 捕获面板改版目标稿</title>
+<style>
+  :root {
+    --bg: #f3f4f6;
+    --surface: #ffffff;
+    --border: rgba(128,128,128,.28);
+    --border-strong: rgba(128,128,128,.45);
+    --ink: #1c1e21;
+    --ink-2: #61666b;
+    --ink-3: #9aa0a6;
+    --brand: #185fa5;
+    --radius: 10px;
+    --radius-sm: 6px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 32px 24px 48px;
+    background: var(--bg);
+    color: var(--ink);
+    font: 13px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  }
+  h1 { font-size: 17px; font-weight: 500; margin: 0 0 4px; }
+  .lead { font-size: 13px; color: var(--ink-2); margin: 0 0 28px; max-width: 70ch; }
+  .row { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; }
+  figure { margin: 0; }
+  figcaption { font-size: 12px; color: var(--ink-2); margin-bottom: 10px; }
+  figcaption b { font-weight: 500; color: var(--ink); }
+  .panel {
+    width: 420px; max-width: 100%;
+    background: var(--surface);
+    border: .5px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px 16px;
+  }
+  .panel h2 { font-size: 12px; font-weight: 500; color: var(--ink-3); margin: 16px 0 8px; letter-spacing: .04em; }
+  .panel h2:first-of-type { margin-top: 0; }
+  .hr { height: .5px; background: var(--border); margin: 12px 0 0; }
+  .head { display: flex; align-items: center; justify-content: space-between; }
+  .head .title { display: flex; align-items: center; gap: 6px; font-weight: 500; }
+  .mark { color: var(--brand); }
+  .muted { color: var(--ink-2); }
+  .faint { color: var(--ink-3); }
+  .sm { font-size: 11px; }
+  .xs { font-size: 12px; }
+  .icon-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: var(--radius-sm);
+    color: var(--ink-2); font-size: 15px; line-height: 1;
+  }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    border-radius: var(--radius-sm); padding: 6px 12px; font-size: 12px; font-weight: 500;
+    border: .5px solid var(--border-strong); background: transparent; color: var(--ink);
+  }
+  .btn.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .btn.quiet { font-size: 11px; padding: 3px 8px; color: var(--ink-2); }
+  .seg { display: inline-flex; background: rgba(128,128,128,.10); border-radius: var(--radius-sm); padding: 2px; gap: 2px; }
+  .seg span { padding: 3px 9px; border-radius: 5px; font-size: 12px; color: var(--ink-2); }
+  .seg span.on { background: var(--surface); border: .5px solid var(--border-strong); color: var(--ink); font-weight: 500; }
+  .field {
+    border: .5px solid var(--border-strong); border-radius: var(--radius-sm);
+    padding: 4px 8px; font-size: 12px; background: var(--surface); color: var(--ink);
+  }
+  .field.empty { color: var(--ink-3); }
+  label.cell { display: grid; gap: 3px; }
+  label.cell > span:first-child { font-size: 11px; color: var(--ink-2); }
+  .badge { border-radius: 999px; padding: 1px 7px; font-size: 11px; line-height: 1.5; white-space: nowrap; }
+  .b-saved { background: #eaf3de; color: #3b6d11; }
+  .b-quar { background: #faeeda; color: #854f0b; }
+  .b-skip { background: #f1efe8; color: #5f5e5a; }
+  .b-fail { background: #fcebeb; color: #a32d2d; }
+  .entry { display: flex; align-items: flex-start; gap: 8px; padding: 7px 0; border-top: .5px solid var(--border); }
+  .cb { width: 14px; height: 14px; margin-top: 2px; border-radius: 4px; border: .5px solid var(--border-strong); flex-shrink: 0; }
+  .cb.on { background: var(--brand); border-color: var(--brand); }
+  .cb.off { opacity: .75; }
+  .line1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .title { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta { font-size: 11px; color: var(--ink-2); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chev { color: var(--ink-3); font-size: 15px; line-height: 1; flex-shrink: 0; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .stack { display: grid; gap: 8px; }
+  .foot { display: flex; gap: 8px; }
+  .foot > * { flex: 1 1 auto; text-align: center; }
+  .notice {
+    display: flex; gap: 8px; align-items: flex-start; margin-top: 10px;
+    padding: 8px 10px; border-radius: var(--radius-sm); background: #faeeda; color: #854f0b; font-size: 11px;
+  }
+  .note { font-size: 11px; color: var(--ink-3); margin-top: 24px; max-width: 76ch; }
+  .note b { font-weight: 500; color: var(--ink-2); }
+</style>
+</head>
+<body>
+
+<h1>dsh-refkeeper 捕获面板改版目标稿</h1>
+<p class="lead">
+  这是 <code>docs/ui-polish-plan.md</code> 的视觉对照。左图是 <b>B2</b> 的交付目标（列表视图），
+  右图是 <b>B3</b> 的交付目标（条目详情独立视图）。两图共用 420px 面板宽度与同一套设计令牌。
+</p>
+
+<div class="row">
+
+<figure>
+  <figcaption><b>B2 · 捕获面板（列表视图）</b> —— 范围分段控件、主操作上移、状态徽章、元信息副行、导出区分组</figcaption>
+  <div class="panel">
+
+    <div class="head">
+      <div class="title"><span class="mark">❝</span><span>捕获文献</span></div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span class="sm faint">2 分钟前</span>
+        <span class="icon-btn">×</span>
+      </div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:8px;margin-top:14px;">
+      <span class="xs muted">范围</span>
+      <div class="seg"><span>本轮</span><span class="on">前 N 轮</span><span>全部对话</span></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;margin-top:8px;padding-left:44px;">
+      <span class="xs muted">轮数</span>
+      <span class="field" style="min-width:40px;text-align:center;">3</span>
+      <span class="sm faint">包含最近 3 轮对话</span>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:10px;">
+      <span class="btn primary"><span class="mark">❝</span>捕获并保存</span>
+    </div>
+
+    <div class="hr"></div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0 4px;">
+      <span class="xs" style="font-weight:500;">最近一次捕获 · 4</span>
+      <span class="btn quiet">刷新</span>
+    </div>
+
+    <div class="entry">
+      <span class="cb on"></span>
+      <div style="flex:1 1 auto;min-width:0;">
+        <div class="line1">
+          <span class="badge b-saved">已入表</span>
+          <span class="title">A self-calibrating Palmer Drought Severity Index for the United States</span>
+        </div>
+        <div class="meta">Daly et al. · 2006 · Water Resources Research 42(7)</div>
+      </div>
+      <span class="chev">›</span>
+    </div>
+
+    <div class="entry">
+      <span class="cb"></span>
+      <div style="flex:1 1 auto;min-width:0;">
+        <div class="line1">
+          <span class="badge b-quar">隔离</span>
+          <span class="title">Physiographically sensitive mapping of temperature and precipitation</span>
+        </div>
+        <div class="meta">Daly et al. · 2008 · Int. J. Climatology 28(15) · 标题未匹配</div>
+      </div>
+      <span class="chev">›</span>
+    </div>
+
+    <div class="entry">
+      <span class="cb on"></span>
+      <div style="flex:1 1 auto;min-width:0;">
+        <div class="line1">
+          <span class="badge b-saved">已入表</span>
+          <span class="title">Meteorological Drought</span>
+        </div>
+        <div class="meta">Heim · 2002 · Bulletin of the AMS 83(9)</div>
+      </div>
+      <span class="chev">›</span>
+    </div>
+
+    <div class="entry" style="opacity:.75;">
+      <span class="cb off"></span>
+      <div style="flex:1 1 auto;min-width:0;">
+        <div class="line1">
+          <span class="badge b-skip">跳过</span>
+          <span class="title">10.1175/1520-0450(1994)033</span>
+        </div>
+        <div class="meta">仅识别到 DOI，没有标题，无法核对</div>
+      </div>
+      <span class="btn quiet" style="flex-shrink:0;">手动入表</span>
+    </div>
+
+    <div class="hr"></div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0 6px;">
+      <span class="xs" style="font-weight:500;">导出</span>
+      <span class="sm muted">已勾选 2 条</span>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span class="xs muted" style="flex-shrink:0;">文件夹</span>
+      <span class="field muted" style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">/Volumes/My Passport/manuscripts/refs/test</span>
+      <span class="btn quiet" style="flex-shrink:0;">保存文件夹</span>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+      <span class="xs muted">格式</span>
+      <span class="cb on" style="margin-top:0;"></span><span class="xs">BibTeX</span>
+      <span class="cb on" style="margin-top:0;"></span><span class="xs">RIS</span>
+    </div>
+
+    <div class="foot" style="margin-top:12px;">
+      <span class="btn primary">导出本次捕获</span>
+      <span class="btn">导出全部文献</span>
+    </div>
+
+  </div>
+</figure>
+
+<figure>
+  <figcaption><b>B3 · 条目详情（独立视图）</b> —— 返回按钮、标识／书目／出版三组、标签置于输入框上方</figcaption>
+  <div class="panel">
+
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span class="icon-btn" style="border:.5px solid var(--border-strong);">‹</span>
+      <span style="flex:1 1 auto;min-width:0;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Physiographically sensitive mapping of temperature and precipitation across the conterminous United States</span>
+      <span class="badge b-saved">已入表</span>
+    </div>
+
+    <div class="hr"></div>
+
+    <h2>标识</h2>
+    <div class="stack">
+      <label class="cell"><span>DOI</span><span class="field">10.1002/joc.1688</span></label>
+      <div class="grid2">
+        <label class="cell"><span>arXiv ID</span><span class="field empty">—</span></label>
+        <label class="cell"><span>语言</span><span class="field">en</span></label>
+      </div>
+    </div>
+
+    <h2 style="border-top:.5px solid var(--border);padding-top:14px;">书目</h2>
+    <div class="stack">
+      <label class="cell"><span>条目类型</span><span class="field" style="display:flex;justify-content:space-between;">期刊论文<span class="faint">▾</span></span></label>
+      <label class="cell"><span>标题</span><span class="field">Physiographically sensitive mapping of temperature and precipitation across the conterminous United States</span></label>
+      <label class="cell"><span>作者<span class="faint"> · 每行一个，「姓, 名」</span></span><span class="field" style="line-height:1.6;">Daly, C.<br>Halbleib, M.<br>Smith, J. I.</span></label>
+      <label class="cell"><span>出版物</span><span class="field">International Journal of Climatology</span></label>
+    </div>
+
+    <h2 style="border-top:.5px solid var(--border);padding-top:14px;">出版</h2>
+    <div class="stack">
+      <div class="grid4">
+        <label class="cell"><span>年份</span><span class="field">2008</span></label>
+        <label class="cell"><span>卷</span><span class="field">28</span></label>
+        <label class="cell"><span>期</span><span class="field">15</span></label>
+        <label class="cell"><span>页码</span><span class="field">2031–2064</span></label>
+      </div>
+      <div class="grid2">
+        <label class="cell"><span>出版社</span><span class="field">Wiley</span></label>
+        <label class="cell"><span>出版地</span><span class="field empty">—</span></label>
+      </div>
+      <label class="cell"><span>URL</span><span class="field muted">https://doi.org/10.1002/joc.1688</span></label>
+    </div>
+
+    <div class="hr"></div>
+
+    <div style="display:flex;align-items:center;gap:8px;margin-top:12px;">
+      <span class="btn primary">保存修改</span>
+      <span class="btn">还原</span>
+      <span class="sm faint" style="flex:1 1 auto;text-align:right;">字段取自 Crossref，保存后写入文献库</span>
+    </div>
+
+    <div class="notice">
+      <span style="flex-shrink:0;">!</span>
+      <span>隔离条目：重新核验通过后自动入表，或人工确认入表。</span>
+    </div>
+
+  </div>
+</figure>
+
+</div>
+
+<p class="note">
+  <b>硬约束（两图通用）：</b>面板宽 420px；路径输入框的 onChange 只写本地 state，宿主往返必须由显式按钮点击触发；
+  不出现任何「选择文件夹」按钮；状态色必须走 <code>--dsw-alias-state-*-primary</code>，不得回落到硬编码色值。
+</p>
+
+</body>
+</html>

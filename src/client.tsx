@@ -26,10 +26,14 @@ import * as React from 'react'
 
 import { BATCH_MARKER, decodeBatch } from './core/batch.ts'
 import type { BatchEntry, CaptureBatch } from './core/batch.ts'
-import { parseAuthors } from './ui/authors.ts'
+import { parseAuthorLines } from './ui/authors.ts'
 import { decodeDir } from './core/panel.ts'
 import type { DirectorySetting } from './core/panel.ts'
-import { encodeFlag, payloadFlag } from './ui/payload.ts'
+import { encodeFlag } from './ui/payload.ts'
+import { stringsFor } from './ui/strings.ts'
+import type { Strings } from './ui/strings.ts'
+import { UI_TOKENS } from './ui/tokens.ts'
+import { REF_TYPES } from './store/types.ts'
 
 export const REGISTRANT = 'dsh-refkeeper'
 
@@ -74,235 +78,6 @@ function usePanelState(): PanelState {
   )
 }
 
-interface Strings {
-  readonly button: string
-  readonly buttonTitle: string
-  readonly heading: string
-  readonly scopeLabel: string
-  readonly scopeTurn: string
-  readonly scopeLastN: string
-  readonly scopeAll: string
-  readonly turnsLabel: string
-  readonly includeTools: string
-  readonly exportSelection: string
-  readonly exportNone: string
-  readonly capture: string
-  readonly captureAndSave: string
-  readonly manualToggle: string
-  readonly manualHint: string
-  readonly title: string
-  readonly doi: string
-  readonly year: string
-  readonly authors: string
-  readonly summary: string
-  readonly relevance: string
-  readonly evidence: string
-  readonly caveats: string
-  readonly save: string
-  readonly list: string
-  readonly export: string
-  readonly exportAll: string
-  readonly exportChooseDir: string
-  /** Folder the export buttons write into by default. */
-  readonly defaultDirLabel: string
-  readonly defaultDirUnset: string
-  readonly dirPlaceholder: string
-  readonly dirSave: string
-  readonly dirClearLabel: string
-  readonly formatLabel: string
-  readonly formatBibtex: string
-  readonly formatRis: string
-  readonly enrich: string
-  readonly batchHeading: string
-  readonly batchEmpty: string
-  readonly refresh: string
-  /** Tooltip on the mark that says the model annotated this entry. */
-  readonly annotated: string
-  /** Move a quarantined entry into the library after a fresh check. */
-  readonly promoteVerify: string
-  /** Move a quarantined entry in as manually accepted, no registry check. */
-  readonly promoteManual: string
-  readonly statusSaved: string
-  readonly statusQuarantined: string
-  readonly statusSkipped: string
-  readonly statusFailed: string
-  readonly close: string
-  readonly needTitle: string
-  readonly unavailable: string
-  readonly detailsShow: string
-  readonly detailsHide: string
-  readonly detailsSave: string
-  readonly detailsSaved: string
-  readonly detailsStale: string
-  readonly detailsReset: string
-  readonly fieldType: string
-  readonly fieldTitle: string
-  readonly fieldAuthors: string
-  readonly fieldAuthorsHint: string
-  readonly fieldContainer: string
-  readonly fieldYear: string
-  readonly fieldVolume: string
-  readonly fieldIssue: string
-  readonly fieldPages: string
-  readonly fieldPublisher: string
-  readonly fieldPlace: string
-  readonly fieldLanguage: string
-  readonly fieldDoi: string
-  readonly fieldArxiv: string
-  readonly fieldUrl: string
-}
-
-const EN: Strings = {
-  button: 'Refs',
-  buttonTitle: 'Capture references from this conversation',
-  heading: 'Capture references',
-  scopeLabel: 'Scope',
-  scopeTurn: 'This turn',
-  scopeLastN: 'Last N turns',
-  scopeAll: 'Whole conversation',
-  turnsLabel: 'Turns',
-  includeTools: 'Include tool outputs (noisy)',
-  exportSelection: 'Tick the references to export.',
-  exportNone: 'Nothing ticked: the whole last capture would be exported.',
-  capture: 'Capture & save',
-  captureAndSave: 'Capture & save',
-  manualToggle: 'Add / annotate manually',
-  manualHint:
-    'Takes the same `/refs save` path as the model: the entry is verified first and only stored when it passes.',
-  title: 'Title *',
-  doi: 'DOI',
-  year: 'Year',
-  authors: 'Authors (comma separated)',
-  summary: 'Summary',
-  relevance: 'Relevance to this work',
-  evidence: 'Evidence (quote or location)',
-  caveats: 'Caveats',
-  save: 'Verify & save',
-  list: 'Library',
-  export: 'Export this capture',
-  exportAll: 'Export all references',
-  exportChooseDir: 'Choose export folder…',
-  defaultDirLabel: 'Folder',
-  defaultDirUnset: 'not set (refs/exports/)',
-  dirPlaceholder: 'Paste a folder path…',
-  dirSave: 'Save folder',
-  dirClearLabel: 'Clear',
-  formatLabel: 'Formats',
-  formatBibtex: 'BibTeX',
-  formatRis: 'RIS',
-  enrich: 'Fill missing fields',
-  batchHeading: 'Last capture',
-  batchEmpty: 'Nothing captured yet — the export buttons then fall back to the whole library.',
-  refresh: 'Refresh list',
-  annotated: 'annotated',
-  promoteVerify: 'Re-verify',
-  promoteManual: 'Store as manual',
-  statusSaved: 'saved',
-  statusQuarantined: '⚠ quarantined',
-  statusSkipped: 'skipped',
-  statusFailed: 'failed',
-  close: 'Close',
-  needTitle: 'A title is required before saving.',
-  unavailable: 'The composer is not ready yet; reopen the panel and retry.',
-  detailsShow: 'Details',
-  detailsHide: 'Hide',
-  detailsSave: 'Save changes',
-  detailsSaved: 'Saved. Exports now use these fields.',
-  detailsStale:
-    'This entry was captured before field snapshots existed, so only its title, year and id are known. Press “Fill missing fields” (or capture again) to pull the full record from the registries.',
-  detailsReset: 'Revert',
-  fieldType: 'Type',
-  fieldTitle: 'Title',
-  fieldAuthors: 'Authors (one per line)',
-  fieldAuthorsHint: 'Family, Given',
-  fieldContainer: 'Publication',
-  fieldYear: 'Year',
-  fieldVolume: 'Volume',
-  fieldIssue: 'Issue',
-  fieldPages: 'Pages',
-  fieldPublisher: 'Publisher',
-  fieldPlace: 'Place',
-  fieldLanguage: 'Language',
-  fieldDoi: 'DOI',
-  fieldArxiv: 'arXiv ID',
-  fieldUrl: 'URL',
-}
-
-const ZH: Strings = {
-  button: '引用',
-  buttonTitle: '从当前对话中捕获文献',
-  heading: '捕获文献',
-  scopeLabel: '范围',
-  scopeTurn: '本轮',
-  scopeLastN: '前 N 轮',
-  scopeAll: '全部对话',
-  turnsLabel: '轮数',
-  includeTools: '包含工具输出（可能含噪声）',
-  exportSelection: '勾选需要导出的文献',
-  exportNone: '没有勾选任何条目：将导出整批次（含已入表条目）',
-  capture: '捕获并保存',
-  captureAndSave: '捕获并保存',
-  manualToggle: '手动添加 / 补充注解',
-  manualHint: '与模型走同一条 `/refs save`：先校验，通过才入主表，不通过进 ⚠ 区。',
-  title: '标题 *',
-  doi: 'DOI',
-  year: '年份',
-  authors: '作者（逗号分隔）',
-  summary: '摘要',
-  relevance: '与本工作的关系',
-  evidence: '证据（原话或位置）',
-  caveats: '注意事项',
-  save: '校验并保存',
-  list: '文献库',
-  export: '导出本次捕获',
-  exportAll: '导出全部文献',
-  exportChooseDir: '选择导出目录…',
-  defaultDirLabel: '文件夹',
-  defaultDirUnset: '未设置（refs/exports/）',
-  dirPlaceholder: '粘贴文件夹路径…',
-  dirSave: '保存文件夹',
-  dirClearLabel: '清除',
-  formatLabel: '导出格式',
-  formatBibtex: 'BibTeX',
-  formatRis: 'RIS',
-  enrich: '补全缺失字段',
-  batchHeading: '最近一次捕获',
-  batchEmpty: '还没有捕获记录；此时导出会退回整库。',
-  refresh: '刷新列表',
-  annotated: '已注解',
-  promoteVerify: '重新核验',
-  promoteManual: '人工确认入表',
-  statusSaved: '已入表',
-  statusQuarantined: '⚠ 隔离',
-  statusSkipped: '跳过',
-  statusFailed: '失败',
-  close: '关闭',
-  needTitle: '保存前必须填写标题。',
-  unavailable: '输入框尚未就绪，请重新打开面板再试。',
-  detailsShow: '详细信息',
-  detailsHide: '收起',
-  detailsSave: '保存修改',
-  detailsSaved: '已保存，导出将使用修改后的字段。',
-  detailsStale:
-    '这条是较早捕获留下的，只存了标题、年份和标识，没有完整字段。点“补全缺失字段”（或重新捕获一次）即可从 Crossref / OpenAlex 补全。',
-  detailsReset: '还原',
-  fieldType: '条目类型',
-  fieldTitle: '标题',
-  fieldAuthors: '作者（每行一个）',
-  fieldAuthorsHint: '“姓, 名”',
-  fieldContainer: '出版物',
-  fieldYear: '年份',
-  fieldVolume: '卷',
-  fieldIssue: '期',
-  fieldPages: '页码',
-  fieldPublisher: '出版社',
-  fieldPlace: '出版地',
-  fieldLanguage: '语言',
-  fieldDoi: 'DOI',
-  fieldArxiv: 'arXiv ID',
-  fieldUrl: 'URL',
-}
-
 /**
  * The browser client's locale service, captured in `apply()`.
  *
@@ -323,11 +98,6 @@ function activeLocale(): string | undefined {
   } catch {
     return undefined
   }
-}
-
-/** Pick a dictionary for one BCP 47 tag, defaulting to English. */
-function stringsFor(tag: string | undefined): Strings {
-  return tag !== undefined && tag.toLowerCase().startsWith('zh') ? ZH : EN
 }
 
 /**
@@ -489,10 +259,10 @@ function useLatestDir(sessionId: string | undefined, nonce = 0): DirectorySettin
 }
 
 const STATUS_TONE: Record<BatchEntry['status'], string> = {
-  saved: 'var(--dsw-alias-success, #1a7f37)',
-  quarantined: 'var(--dsw-alias-warn, #b26a00)',
-  skipped: 'var(--dsw-alias-fg-secondary, #6b7280)',
-  failed: 'var(--dsw-alias-danger, #b42318)',
+  saved: UI_TOKENS.color.success,
+  quarantined: UI_TOKENS.color.warning,
+  skipped: UI_TOKENS.color.neutral,
+  failed: UI_TOKENS.color.error,
 }
 
 function statusLabel(entry: BatchEntry, text: Strings): string {
@@ -500,6 +270,15 @@ function statusLabel(entry: BatchEntry, text: Strings): string {
   if (entry.status === 'quarantined') return text.statusQuarantined
   if (entry.status === 'skipped') return text.statusSkipped
   return text.statusFailed
+}
+
+function entryMeta(entry: BatchEntry, text: Strings): string {
+  const authors = entry.fields?.authors ?? []
+  const author = authors.length === 1 ? authors[0] : authors.length === 2
+    ? `${authors[0]} ${text.authorConjunction} ${authors[1]}`
+    : authors.length > 2 ? `${authors[0]} et al.` : ''
+  return [author, entry.fields?.year === undefined ? '' : String(entry.fields.year), entry.fields?.containerTitle ?? '', entry.reason ?? '']
+    .filter((part): part is string => typeof part === 'string' && part.trim() !== '').join(' · ')
 }
 
 interface FieldRow {
@@ -560,7 +339,7 @@ function patchOf(entry: BatchEntry, draft: Record<string, string>): Record<strin
     const before = (base[field.key] ?? '').trim()
     if (value === before) continue
     if (field.key === 'authors') {
-      patch['authors'] = value === '' ? [] : value.split('\n').map((line) => line.trim()).filter((line) => line !== '')
+      patch['authors'] = parseAuthorLines(value)
       continue
     }
     if (field.key === 'year') {
@@ -677,89 +456,189 @@ function BatchList(props: {
   readonly onToggle: (id: string, next: boolean) => void
   readonly onEdit: (id: string, patch: Record<string, unknown>, title?: string) => void
   readonly onPromote: (entry: BatchEntry, manual: boolean) => void
+  readonly onManualSave: (entry: BatchEntry, payload: Record<string, unknown>) => void
   readonly titleOf: (entry: BatchEntry) => string
+  readonly pickedCount: number
+  readonly onRefresh: () => void
 }): React.ReactElement {
-  const { batch, text, isPicked, onToggle, onEdit, onPromote, titleOf } = props
+  const { batch, text, isPicked, onToggle, onEdit, onPromote, onManualSave, titleOf, pickedCount, onRefresh } = props
+  const [openEntry, setOpenEntry] = React.useState<string | undefined>(undefined)
+  const [manualEntryKey, setManualEntryKey] = React.useState<string | undefined>(undefined)
+  const [manualDraft, setManualDraft] = React.useState({ title: '', doi: '', arxivId: '', year: '', author: '', type: 'journalArticle' })
   if (batch === undefined) {
-    return React.createElement('div', { style: { marginTop: '8px', opacity: 0.7 } }, text.batchEmpty)
+    return React.createElement(
+      'div',
+      {
+        style: {
+          marginTop: '12px',
+          padding: '18px 14px',
+          textAlign: 'center',
+          border: '1px dashed var(--dsw-alias-border-l1, rgba(128,128,128,.35))',
+          borderRadius: UI_TOKENS.radius.panel,
+          background: 'var(--dsw-alias-bg-l1, rgba(128,128,128,.04))',
+          color: 'var(--dsw-alias-label-tertiary, inherit)',
+        },
+      },
+      React.createElement('div', { 'aria-hidden': true, style: { fontSize: '22px', marginBottom: '4px' } }, '⌕'),
+      React.createElement('div', { style: { fontSize: '13px', fontWeight: 500 } }, text.batchEmpty),
+    )
   }
   return React.createElement(
     'div',
-    { style: { marginTop: '8px', display: 'grid', gap: '2px' } },
+    { style: { marginTop: '10px', display: 'grid', gap: UI_TOKENS.spacing.sm } },
     React.createElement(
       'div',
-      { style: { ...ROW_STYLE, justifyContent: 'space-between', opacity: 0.8 } },
-      React.createElement('strong', null, `${text.batchHeading} · ${String(batch.entries.length)}`),
-      React.createElement('span', null, batch.scope),
+      { style: { ...ROW_STYLE, justifyContent: 'space-between', gap: '8px' } },
+      React.createElement('span', { style: { fontWeight: 500 } }, `${text.batchHeading} · ${String(batch.entries.length)}`),
+      React.createElement('div', { style: { ...ROW_STYLE, flexShrink: 0 } },
+        React.createElement('span', { style: { opacity: 0.7, fontSize: UI_TOKENS.fontSize.caption } }, batch.scope),
+        React.createElement('button', { type: 'button', onClick: onRefresh, style: { ...BASE_BUTTON, padding: '3px 7px' } }, text.refresh)),
     ),
-    ...batch.entries.map((entry, index) =>
-      React.createElement(
-        'details',
-        { key: `${String(index)}:${entry.id ?? entry.title}`, style: { padding: '2px 0' } },
-        // The panel sits in a 340px dock, so the row must never wrap: the
-        // checkbox and the status keep their width and the title takes what is
-        // left and ellipsises. The flex row lives inside <summary> instead of
-        // replacing its display, otherwise the disclosure marker disappears.
+    React.createElement('div', { style: { fontSize: UI_TOKENS.fontSize.caption, color: UI_TOKENS.color.neutral } }, text.selectedCount.replace('{n}', String(pickedCount))),
+    ...batch.entries.map((entry, index) => {
+      const key = `${String(index)}:${entry.id ?? entry.title}`
+      const title = titleOf(entry) === '' ? entry.doi ?? entry.arxivId ?? '—' : titleOf(entry)
+      const expandable = entry.id !== undefined
+      const expanded = openEntry === key
+      const meta = entryMeta(entry, text)
+      return React.createElement(
+        'div',
+        {
+          key,
+          style: {
+            border: '1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.24))',
+            borderRadius: UI_TOKENS.radius.panel,
+            padding: '8px 9px',
+            background: 'var(--dsw-alias-bg-l1, rgba(128,128,128,.035))',
+            minWidth: 0,
+          },
+        },
         React.createElement(
-          'summary',
-          { style: { cursor: 'pointer' } },
+          'div',
+          { style: { ...ROW_STYLE, gap: '7px', flexWrap: 'nowrap', minWidth: 0 } },
+          entry.id === undefined
+            ? React.createElement('span', { style: { width: '13px', flexShrink: 0 } })
+            : React.createElement('input', {
+                type: 'checkbox',
+                checked: isPicked(entry),
+                title: text.exportSelection,
+                onChange: (event: React.ChangeEvent<HTMLInputElement>) => onToggle(entry.id as string, event.target.checked),
+                style: { flexShrink: 0, margin: 0 },
+              }),
           React.createElement(
-            'div',
-            { style: { ...ROW_STYLE, gap: '6px', flexWrap: 'nowrap', overflow: 'hidden' } },
-            entry.id === undefined
-              ? React.createElement('span', { style: { width: '13px', flexShrink: 0 } })
-              : React.createElement('input', {
-                  type: 'checkbox',
-                  checked: isPicked(entry),
-                  title: text.exportSelection,
-                  onClick: (event: React.MouseEvent) => event.stopPropagation(),
-                  onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
-                    onToggle(entry.id as string, event.target.checked),
-                  style: { flexShrink: 0, margin: 0 },
-                }),
-            React.createElement(
-              'span',
-              { style: { color: STATUS_TONE[entry.status], flexShrink: 0, whiteSpace: 'nowrap' } },
-              statusLabel(entry, text),
-            ),
-            entry.annotated === true
-              ? React.createElement(
-                  'span',
-                  { title: text.annotated, style: { flexShrink: 0, opacity: 0.65 } },
-                  '✎',
-                )
-              : null,
-            React.createElement(
-              'span',
-              {
-                style: { flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-                title: titleOf(entry),
+            'span',
+            {
+              style: {
+                color: STATUS_TONE[entry.status],
+                flexShrink: 0,
+                whiteSpace: 'nowrap',
+                padding: '2px 7px',
+                borderRadius: '999px',
+                background: 'rgba(128,128,128,.12)',
+                backgroundColor: `color-mix(in srgb, ${STATUS_TONE[entry.status]} 14%, transparent)`,
+                fontSize: UI_TOKENS.fontSize.caption,
               },
-              titleOf(entry) === '' ? entry.doi ?? entry.arxivId ?? '—' : titleOf(entry),
-            ),
+            },
+            statusLabel(entry, text),
           ),
+          entry.annotated === true
+            ? React.createElement('span', { title: text.annotated, style: { flexShrink: 0, opacity: 0.65 } }, '✎')
+            : null,
+          React.createElement(
+            expandable ? 'button' : 'span',
+            expandable
+              ? {
+                  type: 'button',
+                  'aria-expanded': expanded,
+                  onClick: () => setOpenEntry(expanded ? undefined : key),
+                  style: { flex: '1 1 auto', minWidth: 0, border: 'none', background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left', padding: 0, cursor: 'pointer' },
+                  title,
+                }
+              : { style: { flex: '1 1 auto', minWidth: 0 } },
+            React.createElement('span', { style: { display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, title),
+          ),
+          expandable ? React.createElement('span', { 'aria-hidden': true, style: { flexShrink: 0, opacity: 0.6 } }, expanded ? '⌄' : '›') : null,
+          entry.status === 'skipped'
+            ? React.createElement('button', {
+                type: 'button',
+                onClick: () => {
+                  setManualEntryKey(manualEntryKey === key ? undefined : key)
+                  setManualDraft({ title: titleOf(entry), doi: entry.doi ?? '', arxivId: entry.arxivId ?? '', year: '', author: '', type: 'journalArticle' })
+                },
+                'aria-expanded': manualEntryKey === key,
+                style: { ...BASE_BUTTON, flexShrink: 0, padding: '3px 7px' },
+              }, text.manualOpen)
+            : null,
         ),
-        React.createElement(EntryDetails, { entry, text, onSave: onEdit }),
-        // Only a quarantined row can move: verified rows are already in the
-        // library and skipped rows never became candidates.
-        entry.status === 'quarantined' && entry.id !== undefined
+        meta === '' ? null : React.createElement('div', { title: meta, style: { margin: '4px 0 0 20px', fontSize: UI_TOKENS.fontSize.caption, lineHeight: 1.4, color: 'var(--dsw-alias-label-secondary, rgba(128,128,128,.82))', overflowWrap: 'anywhere' } }, meta),
+        manualEntryKey === key
           ? React.createElement(
-              'div',
-              { style: { display: 'flex', gap: '6px', padding: '0 0 8px 19px' } },
-              React.createElement(
-                'button',
-                { type: 'button', onClick: () => onPromote(entry, false) },
-                text.promoteVerify,
+              'form',
+              {
+                onSubmit: (event: React.FormEvent<HTMLFormElement>) => {
+                  event.preventDefault()
+                  const payload = {
+                    title: manualDraft.title.trim(),
+                    type: manualDraft.type,
+                    year: Number(manualDraft.year),
+                    authors: [manualDraft.author.trim()],
+                    ...(manualDraft.doi.trim() === '' ? {} : { doi: manualDraft.doi.trim() }),
+                    ...(manualDraft.arxivId.trim() === '' ? {} : { arxivId: manualDraft.arxivId.trim() }),
+                  }
+                  if (payload.title === '' || manualDraft.author.trim() === '' || manualDraft.year.trim() === '' || !Number.isInteger(payload.year)) return
+                  onManualSave(entry, payload)
+                  setManualEntryKey(undefined)
+                },
+                style: { display: 'grid', gap: '6px', margin: '8px 0 0 20px' },
+              },
+              ...([
+                ['title', text.fieldTitle, 'text', true],
+                ['doi', text.fieldDoi, 'text', false],
+                ['arxivId', text.fieldArxiv, 'text', false],
+                ['year', text.fieldYear, 'number', true],
+                ['author', text.fieldFirstAuthor, 'text', true],
+              ] as const).map(([field, label, inputType, required]) => React.createElement(
+                'label',
+                { key: field, style: { display: 'grid', gridTemplateColumns: '68px 1fr', gap: '6px', alignItems: 'center', fontSize: UI_TOKENS.fontSize.caption } },
+                React.createElement('span', null, label),
+                React.createElement('input', {
+                  type: inputType,
+                  min: inputType === 'number' ? 0 : undefined,
+                  max: inputType === 'number' ? 9999 : undefined,
+                  value: manualDraft[field],
+                  required,
+                  onChange: (event: React.ChangeEvent<HTMLInputElement>) => setManualDraft((value) => ({ ...value, [field]: event.target.value })),
+                  style: FIELD_STYLE,
+                }),
+              )),
+              React.createElement('label', { style: { display: 'grid', gridTemplateColumns: '68px 1fr', gap: '6px', alignItems: 'center', fontSize: UI_TOKENS.fontSize.caption } },
+                React.createElement('span', null, text.fieldType),
+                React.createElement('select', {
+                  value: manualDraft.type,
+                  onChange: (event: React.ChangeEvent<HTMLSelectElement>) => setManualDraft((value) => ({ ...value, type: event.target.value })),
+                  style: FIELD_STYLE,
+                }, ...REF_TYPES.map((type) => React.createElement('option', { key: type, value: type }, type))),
               ),
-              React.createElement(
-                'button',
-                { type: 'button', onClick: () => onPromote(entry, true) },
-                text.promoteManual,
-              ),
+              React.createElement('button', { type: 'submit', disabled: manualDraft.title.trim() === '' || manualDraft.year.trim() === '' || manualDraft.author.trim() === '', style: { ...BASE_BUTTON, justifySelf: 'start' } }, text.manualSave),
             )
           : null,
-      ),
-    ),
+        expandable && expanded
+          ? React.createElement(
+              'div',
+              { style: { marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.2))' } },
+              React.createElement(EntryDetails, { entry, text, onSave: onEdit }),
+              entry.status === 'quarantined'
+                ? React.createElement(
+                    'div',
+                    { style: { display: 'flex', gap: '6px', padding: '8px 0 0 20px', flexWrap: 'wrap' } },
+                    React.createElement('button', { type: 'button', onClick: () => onPromote(entry, false), style: BASE_BUTTON }, text.promoteVerify),
+                    React.createElement('button', { type: 'button', onClick: () => onPromote(entry, true), style: BASE_BUTTON }, text.promoteManual),
+                  )
+                : null,
+            )
+          : null,
+      )
+    }),
   )
 }
 
@@ -818,15 +697,15 @@ function exportLine(current: PanelState, extra = ''): string {
 const BASE_BUTTON: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: '4px',
+  gap: UI_TOKENS.spacing.xs,
   height: '28px',
   padding: '0 8px',
-  borderRadius: '6px',
+  borderRadius: UI_TOKENS.radius.control,
   border: 'none',
   background: 'transparent',
   color: 'inherit',
   font: 'inherit',
-  fontSize: '12px',
+  fontSize: UI_TOKENS.fontSize.control,
   cursor: 'pointer',
 }
 
@@ -837,7 +716,7 @@ const PANEL_STYLE: React.CSSProperties = {
   right: '24px',
   top: '84px',
   zIndex: 60,
-  width: '360px',
+  width: '420px',
   maxWidth: 'calc(100vw - 32px)',
   maxHeight: 'calc(100vh - 140px)',
   overflowY: 'auto',
@@ -859,13 +738,13 @@ const FIELD_STYLE: React.CSSProperties = {
   width: '100%',
   minWidth: 0,
   boxSizing: 'border-box',
-  padding: '4px 6px',
-  borderRadius: '6px',
+  padding: `${UI_TOKENS.spacing.xs} ${UI_TOKENS.spacing.sm}`,
+  borderRadius: UI_TOKENS.radius.control,
   border: '1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.35))',
   background: 'var(--dsw-alias-bg-l1, transparent)',
   color: 'inherit',
   font: 'inherit',
-  fontSize: '12px',
+  fontSize: UI_TOKENS.fontSize.control,
 }
 
 const ROW_STYLE: React.CSSProperties = { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }
@@ -1050,7 +929,21 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
         : null,
       scopeOption('all', text.scopeAll),
     ),
-    React.createElement(BatchList, { batch, text, isPicked, onToggle, onEdit, onPromote, titleOf }),
+    React.createElement(BatchList, {
+      batch,
+      text,
+      isPicked,
+      onToggle,
+      onEdit,
+      onPromote,
+      titleOf,
+      pickedCount: pickedIds.length,
+      onRefresh: () => setNonce((value) => value + 1),
+      onManualSave: (_entry, payload) => {
+        run(`/refs save ${encodeFlag('payload', payload)}`)
+        setNotice(text.detailsSaved)
+      },
+    }),
     React.createElement(
       'div',
       { style: { ...ROW_STYLE, marginTop: '4px', justifyContent: 'space-between', gap: '8px' } },
@@ -1062,7 +955,6 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
         },
         `${text.defaultDirLabel}: ${rememberedDir === '' ? text.defaultDirUnset : rememberedDir}`,
       ),
-      React.createElement('button', { type: 'button', onClick: () => setNonce((value) => value + 1), style: { ...BASE_BUTTON, flexShrink: 0 } }, text.refresh),
     ),
     React.createElement(
       'div',
@@ -1126,7 +1018,7 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
     ),
     notice === ''
       ? null
-      : React.createElement('div', { style: { marginTop: '6px', color: 'var(--dsw-alias-warn, #b26a00)' } }, notice),
+      : React.createElement('div', { style: { marginTop: '6px', color: UI_TOKENS.color.warning } }, notice),
 
   )
 }
