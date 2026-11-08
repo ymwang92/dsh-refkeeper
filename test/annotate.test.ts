@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { annotateCaptured, annotateReferences, groundingFor } from '../src/host/annotate.ts'
 import type { LlmServiceLike, TranscriptLine } from '../src/host/annotate.ts'
 import { coerceReference, loadStore, saveReference } from '../src/store/io.ts'
+import { runStoreCommand } from '../src/host/store-command.ts'
 import type { StoredReference } from '../src/store/types.ts'
 import type { BatchEntry } from '../src/core/batch.ts'
 
@@ -105,6 +106,72 @@ describe('automatic annotation', () => {
       source: 'model',
       status: 'complete',
     })
+  })
+
+  it('rebases completed annotations over concurrent edits and removals', async () => {
+    const original = ref()
+    const removed = ref({ title: 'Concurrent removal fixture', identifiers: { doi: '10.1002/joc.1689' } })
+    await saveReference(workspace, original, { now: NOW })
+    await saveReference(workspace, removed, { now: NOW })
+
+    let signalStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      signalStarted = resolve
+    })
+    let releaseModel!: () => void
+    const gate = new Promise<void>((resolve) => {
+      releaseModel = resolve
+    })
+    const gatedLlm: LlmServiceLike = {
+      stream: () =>
+        (async function* () {
+          signalStarted()
+          await gate
+          yield {
+            type: 'text-delta',
+            index: 0,
+            text: JSON.stringify([
+              ...JSON.parse(answer()),
+              {
+                index: 2,
+                summary: 'A second grounded summary.',
+                relevance: 'It is also cited in the conversation.',
+                evidence: QUOTE,
+                caveats: '',
+              },
+            ]),
+          }
+          yield { type: 'finish', reason: { kind: 'stop' } }
+        })(),
+    }
+
+    const annotating = annotateReferences([original, removed], {
+      workspace,
+      llm: gatedLlm,
+      selection: () => ROUTE,
+      lines: TRANSCRIPT,
+      now: () => new Date(NOW),
+    })
+    await started
+
+    const encodedEdit = Buffer.from(JSON.stringify({ title: 'User-edited title' })).toString('base64url')
+    const edit = await runStoreCommand(`edit --id=${original.id} --payload=${encodedEdit}`, {
+      workspace,
+      now: () => NOW,
+    })
+    expect(edit.kind).toBe('success')
+    const remove = await runStoreCommand('remove 10.1002/joc.1689', { workspace, now: () => NOW })
+    expect(remove.kind).toBe('success')
+
+    releaseModel()
+    const outcome = await annotating
+    expect(outcome.annotated).toBe(1)
+
+    const stored = (await loadStore(workspace, { now: NOW })).state.references
+    const surviving = stored.find((reference) => reference.id === original.id)
+    expect(surviving?.title).toBe('User-edited title')
+    expect(surviving?.annotation?.summary).toBe('A gridded climate dataset for the contiguous United States.')
+    expect(stored.some((reference) => reference.id === removed.id)).toBe(false)
   })
 
   it('drops evidence the model made up instead of storing it', async () => {

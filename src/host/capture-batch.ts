@@ -1,10 +1,9 @@
-import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { BATCH_MARKER, normalizeBatch } from '../core/batch.ts'
 import type { CaptureBatch } from '../core/batch.ts'
+import { readFileAtomic, withStoreLock, writeFileAtomic } from '../store/atomic.ts'
 import { storePaths } from '../store/io.ts'
-import { writeFileAtomic } from '../store/atomic.ts'
 
 /**
  * Persistence for the last capture run.
@@ -31,7 +30,7 @@ export function batchPath(workspace: string): string {
 export async function readBatch(workspace: string): Promise<CaptureBatch | undefined> {
   let raw: string
   try {
-    raw = await readFile(batchPath(workspace), 'utf8')
+    raw = await readFileAtomic(batchPath(workspace))
   } catch {
     return undefined
   }
@@ -42,12 +41,11 @@ export async function readBatch(workspace: string): Promise<CaptureBatch | undef
   }
 }
 
-/** Best effort: a failed write degrades the default export scope, never capture. */
+/** Persist the batch and propagate failures for a visible host notice. */
 export async function writeBatch(workspace: string, batch: CaptureBatch): Promise<boolean> {
-  try {
+  const dir = storePaths(workspace).dir
+  await withStoreLock(dir, async () => {
     await writeFileAtomic(batchPath(workspace), `${JSON.stringify(batch, null, 2)}\n`)
-    return true
-  } catch {
-    return false
-  }
+  })
+  return true
 }

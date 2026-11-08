@@ -1,8 +1,8 @@
-import { copyFile, readFile, stat } from 'node:fs/promises'
+import { open } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { renderAnnotated } from './annotated.ts'
-import { serialize, withStoreLock, writeFileAtomic } from './atomic.ts'
+import { readFileAtomic, serialize, withStoreLock, writeFileAtomic } from './atomic.ts'
 import {
   DEFAULT_MAX_REFERENCES,
   REF_TYPES,
@@ -171,10 +171,13 @@ export function coerceReference(raw: unknown, now: string): StoredReference | un
 }
 
 async function exists(file: string): Promise<boolean> {
-  return stat(file).then(
-    () => true,
-    () => false,
-  )
+  try {
+    await readFileAtomic(file)
+    return true
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+    throw error
+  }
 }
 
 function stamp(now: string): string {
@@ -182,7 +185,7 @@ function stamp(now: string): string {
 }
 
 async function readJson(file: string): Promise<unknown> {
-  const text = await readFile(file, 'utf8')
+  const text = await readFileAtomic(file)
   try {
     return JSON.parse(text) as unknown
   } catch (error) {
@@ -193,11 +196,35 @@ async function readJson(file: string): Promise<unknown> {
   }
 }
 
+async function writeMigrationBackup(source: string, destination: string): Promise<string> {
+  const contents = await readFileAtomic(source)
+  let path = destination
+  let suffix = 0
+  for (;;) {
+    let handle
+    try {
+      handle = await open(path, 'wx')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      suffix += 1
+      path = `${destination}.${String(suffix)}`
+      continue
+    }
+    try {
+      await handle.writeFile(contents, 'utf8')
+      await handle.sync()
+    } finally {
+      await handle.close()
+    }
+    return path
+  }
+}
+
 /** Read `refs/refs.json`, migrating older payloads forward.
  *
  * A legacy payload is a bare array (schemaVersion 0). Before rewriting it the
- * original bytes are copied to `refs.json.bak-<timestamp>` so a bad migration
- * never destroys the only copy.
+ * resolved legacy contents are copied to `refs.json.bak-<timestamp>` so a bad
+ * migration never destroys the only copy.
  */
 export interface LoadOptions {
   readonly now?: string
@@ -248,11 +275,15 @@ export async function loadStore(
 
   if (version === SCHEMA_VERSION) return { state, migrated: false, dropped }
 
-  const backupPath = `${paths.refs}.bak-${stamp(now)}`
-  // Migration rewrites the file on the next save, so a missing backup means the
-  // old library could be lost for good. Fail closed instead of migrating.
+  let backupPath = `${paths.refs}.bak-${stamp(now)}`
+  // Migration rewrites the logical file on the next save, so a missing backup
+  // means the old library could be lost for good. Fail closed instead.
   try {
-    await (options.backup ?? copyFile)(paths.refs, backupPath)
+    if (options.backup) {
+      await options.backup(paths.refs, backupPath)
+    } else {
+      backupPath = await writeMigrationBackup(paths.refs, backupPath)
+    }
   } catch (error) {
     throw new StoreError(
       'backup-failed',

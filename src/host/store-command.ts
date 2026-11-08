@@ -7,7 +7,7 @@ import { encodeDir } from '../core/panel.ts'
 import { stripMarkup } from '../core/text.ts'
 import { EXPORT_EXTENSIONS, renderExport } from '../export/index.ts'
 import type { ExportFormat } from '../export/index.ts'
-import { writeFileAtomic } from '../store/atomic.ts'
+import { withStoreLock, writeFileAtomic } from '../store/atomic.ts'
 import {
   coerceReference,
   loadQuarantine,
@@ -1137,7 +1137,6 @@ export async function removeReferences(
   options: RemoveOptions,
   deps: StoreCommandDeps,
 ): Promise<StoreCommandResult> {
-  const now = deps.now?.() ?? new Date().toISOString()
   const quarantine = options.quarantine === true
   const table = quarantine ? 'refs/quarantine.json' : 'refs/refs.json'
   const targets = (options.targets ?? []).map(normalizeTarget).filter((target) => target !== '')
@@ -1145,54 +1144,57 @@ export async function removeReferences(
     return { kind: 'error', text: `remove needs at least one id, DOI or arXiv id (or --all --yes)\n${STORE_USAGE}` }
   }
 
-  const before = quarantine
-    ? (await loadQuarantine(deps.workspace, { now })).entries
-    : (await loadStore(deps.workspace, { now })).state.references
-  if (before.length === 0) {
-    return { kind: 'success', text: `${table} is empty; nothing to remove` }
-  }
-
-  const kept =
-    options.all === true ? [] : before.filter((ref) => !targets.some((target) => matchesTarget(ref, target)))
-  const missing =
-    options.all === true
-      ? []
-      : targets.filter((target) => !before.some((ref) => matchesTarget(ref, target)))
-  const removed = before.length - kept.length
-  if (removed === 0) {
-    return {
-      kind: 'error',
-      text: `nothing matched in ${table}; nothing was changed   (${before.length} entr${before.length === 1 ? 'y' : 'ies'} kept)\nuse /refs list to copy exact ids`,
+  return withStoreLock(storePaths(deps.workspace).dir, async () => {
+    const now = deps.now?.() ?? new Date().toISOString()
+    const before = quarantine
+      ? (await loadQuarantine(deps.workspace, { now })).entries
+      : (await loadStore(deps.workspace, { now })).state.references
+    if (before.length === 0) {
+      return { kind: 'success', text: `${table} is empty; nothing to remove` }
     }
-  }
 
-  // Removing from the main table must not leave a quarantine copy of the same
-  // work behind: it would reappear under --include-quarantine as a "duplicate".
-  const removedIdentities = new Set(
-    before
-      .filter((ref) => options.all === true || targets.some((target) => matchesTarget(ref, target)))
-      .map((ref) => referenceIdentityKey(ref)),
-  )
-  let alsoDropped = 0
-  if (quarantine) {
-    await writeQuarantine(deps.workspace, { schemaVersion: SCHEMA_VERSION, updatedAt: now, entries: kept })
-  } else {
-    await writeStore(deps.workspace, { schemaVersion: SCHEMA_VERSION, updatedAt: now, references: kept })
-    const stale = await loadQuarantine(deps.workspace, { now })
-    const remaining = stale.entries.filter((ref) => !removedIdentities.has(referenceIdentityKey(ref)))
-    alsoDropped = stale.entries.length - remaining.length
-    if (alsoDropped > 0) {
-      await writeQuarantine(deps.workspace, { schemaVersion: SCHEMA_VERSION, updatedAt: now, entries: remaining })
+    const kept =
+      options.all === true ? [] : before.filter((ref) => !targets.some((target) => matchesTarget(ref, target)))
+    const missing =
+      options.all === true
+        ? []
+        : targets.filter((target) => !before.some((ref) => matchesTarget(ref, target)))
+    const removed = before.length - kept.length
+    if (removed === 0) {
+      return {
+        kind: 'error',
+        text: `nothing matched in ${table}; nothing was changed   (${before.length} entr${before.length === 1 ? 'y' : 'ies'} kept)\nuse /refs list to copy exact ids`,
+      }
     }
-  }
 
-  const lines = [
-    `removed ${String(removed)} of ${String(before.length)} entr${before.length === 1 ? 'y' : 'ies'} from ${table}`,
-    `remaining: ${String(kept.length)}`,
-    ...(missing.length > 0 ? [`unmatched: ${missing.join(', ')}`] : []),
-    ...(alsoDropped > 0 ? [`also dropped ${String(alsoDropped)} quarantined duplicate(s) of the same work`] : []),
-  ]
-  return { kind: 'success', text: lines.join('\n') }
+    // Removing from the main table must not leave a quarantine copy of the same
+    // work behind: it would reappear under --include-quarantine as a "duplicate".
+    const removedIdentities = new Set(
+      before
+        .filter((ref) => options.all === true || targets.some((target) => matchesTarget(ref, target)))
+        .map((ref) => referenceIdentityKey(ref)),
+    )
+    let alsoDropped = 0
+    if (quarantine) {
+      await writeQuarantine(deps.workspace, { schemaVersion: SCHEMA_VERSION, updatedAt: now, entries: kept })
+    } else {
+      await writeStore(deps.workspace, { schemaVersion: SCHEMA_VERSION, updatedAt: now, references: kept })
+      const stale = await loadQuarantine(deps.workspace, { now })
+      const remaining = stale.entries.filter((ref) => !removedIdentities.has(referenceIdentityKey(ref)))
+      alsoDropped = stale.entries.length - remaining.length
+      if (alsoDropped > 0) {
+        await writeQuarantine(deps.workspace, { schemaVersion: SCHEMA_VERSION, updatedAt: now, entries: remaining })
+      }
+    }
+
+    const lines = [
+      `removed ${String(removed)} of ${String(before.length)} entr${before.length === 1 ? 'y' : 'ies'} from ${table}`,
+      `remaining: ${String(kept.length)}`,
+      ...(missing.length > 0 ? [`unmatched: ${missing.join(', ')}`] : []),
+      ...(alsoDropped > 0 ? [`also dropped ${String(alsoDropped)} quarantined duplicate(s) of the same work`] : []),
+    ]
+    return { kind: 'success', text: lines.join('\n') }
+  })
 }
 
 export interface EditRequest {
@@ -1302,63 +1304,65 @@ export async function editReference(
   request: EditRequest,
   deps: StoreCommandDeps,
 ): Promise<StoreCommandResult> {
-  const now = deps.now?.() ?? new Date().toISOString()
-  const store = await loadStore(deps.workspace, { now })
-  const quarantine = await loadQuarantine(deps.workspace, { now })
-  const inMain = store.state.references.find((ref) => ref.id === request.id)
-  const inQuarantine = quarantine.entries.find((ref) => ref.id === request.id)
-  const current = inMain ?? inQuarantine
-  if (current === undefined) {
-    return { kind: 'error', text: `no reference with id "${request.id}" in either table` }
-  }
-
-  // Identity is read before the patch: correcting a DOI changes the key, and the
-  // duplicate in the other table still carries the old one.
-  const identityBefore = referenceIdentityKey(current)
-  const applied = applyPatch(current, request.patch, now)
-  if (applied.changed.length === 0) {
-    return { kind: 'error', text: 'nothing to change: the payload carried no known field' }
-  }
-  const edited = applied.next
-  let synced = 0
-
-  if (inMain !== undefined) {
-    const references = store.state.references.map((ref) => (ref.id === edited.id ? edited : ref))
-    await writeStore(deps.workspace, { ...store.state, updatedAt: now, references })
-    // Same identity means the same work, even when the two tables happen to hold
-    // the same id (that is exactly the duplicate case this is here to fix).
-    const dupes = quarantine.entries.filter((ref) => referenceIdentityKey(ref) === identityBefore)
-    if (dupes.length > 0) {
-      const entries = quarantine.entries.map((ref) =>
-        referenceIdentityKey(ref) === identityBefore ? applyPatch(ref, request.patch, now).next : ref,
-      )
-      await writeQuarantine(deps.workspace, { ...quarantine, updatedAt: now, entries })
-      synced = dupes.length
+  return withStoreLock(storePaths(deps.workspace).dir, async () => {
+    const now = deps.now?.() ?? new Date().toISOString()
+    const store = await loadStore(deps.workspace, { now })
+    const quarantine = await loadQuarantine(deps.workspace, { now })
+    const inMain = store.state.references.find((ref) => ref.id === request.id)
+    const inQuarantine = quarantine.entries.find((ref) => ref.id === request.id)
+    const current = inMain ?? inQuarantine
+    if (current === undefined) {
+      return { kind: 'error', text: `no reference with id "${request.id}" in either table` }
     }
-  } else {
-    const entries = quarantine.entries.map((ref) => (ref.id === edited.id ? edited : ref))
-    await writeQuarantine(deps.workspace, { ...quarantine, updatedAt: now, entries })
-    const dupes = store.state.references.filter((ref) => referenceIdentityKey(ref) === identityBefore)
-    if (dupes.length > 0) {
-      const references = store.state.references.map((ref) =>
-        referenceIdentityKey(ref) === identityBefore ? applyPatch(ref, request.patch, now).next : ref,
-      )
+
+    // Identity is read before the patch: correcting a DOI changes the key, and the
+    // duplicate in the other table still carries the old one.
+    const identityBefore = referenceIdentityKey(current)
+    const applied = applyPatch(current, request.patch, now)
+    if (applied.changed.length === 0) {
+      return { kind: 'error', text: 'nothing to change: the payload carried no known field' }
+    }
+    const edited = applied.next
+    let synced = 0
+
+    if (inMain !== undefined) {
+      const references = store.state.references.map((ref) => (ref.id === edited.id ? edited : ref))
       await writeStore(deps.workspace, { ...store.state, updatedAt: now, references })
-      synced = dupes.length
+      // Same identity means the same work, even when the two tables happen to hold
+      // the same id (that is exactly the duplicate case this is here to fix).
+      const dupes = quarantine.entries.filter((ref) => referenceIdentityKey(ref) === identityBefore)
+      if (dupes.length > 0) {
+        const entries = quarantine.entries.map((ref) =>
+          referenceIdentityKey(ref) === identityBefore ? applyPatch(ref, request.patch, now).next : ref,
+        )
+        await writeQuarantine(deps.workspace, { ...quarantine, updatedAt: now, entries })
+        synced = dupes.length
+      }
+    } else {
+      const entries = quarantine.entries.map((ref) => (ref.id === edited.id ? edited : ref))
+      await writeQuarantine(deps.workspace, { ...quarantine, updatedAt: now, entries })
+      const dupes = store.state.references.filter((ref) => referenceIdentityKey(ref) === identityBefore)
+      if (dupes.length > 0) {
+        const references = store.state.references.map((ref) =>
+          referenceIdentityKey(ref) === identityBefore ? applyPatch(ref, request.patch, now).next : ref,
+        )
+        await writeStore(deps.workspace, { ...store.state, updatedAt: now, references })
+        synced = dupes.length
+      }
     }
-  }
 
-  return {
-    kind: 'success',
-    text: [
-      `edited ${edited.id} → refs/${inMain === undefined ? 'quarantine.json' : 'refs.json'}`,
-      `fields: ${applied.changed.join(', ')}`,
-      `title: ${edited.title}`,
-      ...(synced > 0
-        ? [`also updated ${String(synced)} duplicate copy/copies in ${inMain === undefined ? 'refs/refs.json' : 'refs/quarantine.json'}`]
-        : []),
-    ].join('\n'),
-  }
+    return {
+      kind: 'success',
+      text: [
+        `edited ${edited.id} → refs/${inMain === undefined ? 'quarantine.json' : 'refs.json'}`,
+        `fields: ${applied.changed.join(', ')}`,
+        `title: ${edited.title}`,
+        ...(synced > 0
+          ? [`also updated ${String(synced)} duplicate copy/copies in ${inMain === undefined ? 'refs/refs.json' : 'refs/quarantine.json'}`]
+          : []),
+      ].join('\n'),
+    }
+  })
 }
 
 /**
@@ -1474,60 +1478,126 @@ export async function enrichReferences(
     return { next: { ...next }, filled }
   }
 
-  const report: string[] = []
-  let looked = 0
-  const references: StoredReference[] = []
-  for (const ref of store.state.references) {
-    looked += 1
-    const cleaned = cleanOne(ref)
-    const base = cleaned?.next ?? ref
-    const outcome = await enrichOne(base)
-    const changed = [...(cleaned?.cleaned ?? []), ...(outcome?.filled ?? [])]
-    if (changed.length === 0) {
-      references.push(ref)
-      continue
-    }
-    references.push(outcome?.next ?? base)
-    report.push(`${ref.id} → ${changed.join(', ')}`)
+  const mainIds = new Set(store.state.references.map((ref) => ref.id))
+  const quarantineIds = new Set(quarantine?.entries.map((ref) => ref.id) ?? [])
+  const looked = store.state.references.length + (quarantine?.entries.length ?? 0)
+  type EnrichmentCandidate = {
+    readonly doi: string
+    readonly arxiv: string
+    readonly next: StoredReference
+    readonly filled: readonly string[]
   }
-
-  const entries: StoredReference[] = []
-  if (quarantine !== undefined) {
-    for (const ref of quarantine.entries) {
-      looked += 1
-      const cleaned = cleanOne(ref)
-      const base = cleaned?.next ?? ref
+  const mainCandidates = new Map<string, EnrichmentCandidate>()
+  const quarantineCandidates = new Map<string, EnrichmentCandidate>()
+  const gatherCandidates = async (
+    refs: readonly StoredReference[],
+    candidates: Map<string, EnrichmentCandidate>,
+  ): Promise<void> => {
+    for (const ref of refs) {
+      const base = cleanOne(ref)?.next ?? ref
       const outcome = await enrichOne(base)
-      const changed = [...(cleaned?.cleaned ?? []), ...(outcome?.filled ?? [])]
-      if (changed.length === 0) {
-        entries.push(ref)
-        continue
-      }
-      entries.push(outcome?.next ?? base)
-      report.push(`${ref.id} → ${changed.join(', ')} (quarantine)`)
+      if (outcome === undefined) continue
+      candidates.set(ref.id, {
+        doi: ref.identifiers.doi ?? '',
+        arxiv: ref.identifiers.arxiv ?? '',
+        next: outcome.next,
+        filled: outcome.filled,
+      })
     }
   }
+  await gatherCandidates(store.state.references, mainCandidates)
+  if (quarantine !== undefined) await gatherCandidates(quarantine.entries, quarantineCandidates)
 
-  if (report.length === 0) {
+  return withStoreLock(storePaths(deps.workspace).dir, async () => {
+    const committedAt = deps.now?.() ?? new Date().toISOString()
+    const latestStore = await loadStore(deps.workspace, { now: committedAt })
+    const latestQuarantine = options.quarantine === true
+      ? await loadQuarantine(deps.workspace, { now: committedAt })
+      : undefined
+    const report: string[] = []
+    const applyCandidates = (
+      refs: readonly StoredReference[],
+      initialIds: ReadonlySet<string>,
+      candidates: ReadonlyMap<string, EnrichmentCandidate>,
+      suffix = '',
+    ): { readonly references: StoredReference[]; readonly changed: number } => {
+      let changed = 0
+      const references = refs.map((ref) => {
+        // Don't modify rows that were added while registry calls were in flight.
+        if (!initialIds.has(ref.id)) return ref
+        const cleaned = cleanOne(ref)
+        const changedFields = [...(cleaned?.cleaned ?? [])]
+        let next = cleaned?.next ?? ref
+        const candidate = candidates.get(ref.id)
+        if (
+          candidate !== undefined &&
+          candidate.doi === (ref.identifiers.doi ?? '') &&
+          candidate.arxiv === (ref.identifiers.arxiv ?? '')
+        ) {
+          const filled = new Set(candidate.filled)
+          const mutable: { -readonly [K in keyof StoredReference]: StoredReference[K] } = { ...next }
+          for (const field of EDITABLE_TEXT) {
+            if (!filled.has(field) || (mutable[field] !== undefined && mutable[field] !== '')) continue
+            const value = candidate.next[field]
+            if (typeof value === 'string' && value.trim() !== '') {
+              mutable[field] = value.trim()
+              changedFields.push(field)
+            }
+          }
+          if (filled.has('year') && (mutable.year === undefined || mutable.year === 0) && candidate.next.year !== undefined) {
+            mutable.year = candidate.next.year
+            changedFields.push('year')
+          }
+          if (filled.has('authors') && mutable.authors.length === 0 && candidate.next.authors.length > 0) {
+            mutable.authors = candidate.next.authors
+            changedFields.push('authors')
+          }
+          next = mutable
+        }
+        if (changedFields.length === 0) return ref
+        next = { ...next, updatedAt: committedAt }
+        changed += 1
+        report.push(`${ref.id} → ${changedFields.join(', ')}${suffix}`)
+        return next
+      })
+      return { references, changed }
+    }
+
+    const main = applyCandidates(latestStore.state.references, mainIds, mainCandidates)
+    const quarantined = latestQuarantine === undefined
+      ? undefined
+      : applyCandidates(latestQuarantine.entries, quarantineIds, quarantineCandidates, ' (quarantine)')
+    if (main.changed === 0 && (quarantined?.changed ?? 0) === 0) {
+      return {
+        kind: 'success',
+        text: `enriched 0 of ${looked} reference(s): no missing fields, no Markdown to clean, or no registry matched`,
+      }
+    }
+
+    if (main.changed > 0) {
+      await writeStore(deps.workspace, {
+        ...latestStore.state,
+        updatedAt: committedAt,
+        references: main.references,
+      })
+    }
+    if (quarantined !== undefined && quarantined.changed > 0 && latestQuarantine !== undefined) {
+      await writeQuarantine(deps.workspace, {
+        ...latestQuarantine,
+        updatedAt: committedAt,
+        entries: quarantined.references,
+      })
+    }
+    const shown = report.slice(0, 10)
     return {
       kind: 'success',
-      text: `enriched 0 of ${looked} reference(s): no missing fields, no Markdown to clean, or no registry matched`,
+      text: [
+        `enriched ${report.length} of ${looked} reference(s)`,
+        ...shown.map((line) => `  ${line}`),
+        ...(report.length > shown.length ? [`  …and ${report.length - shown.length} more`] : []),
+      ].join('\n'),
     }
-  }
-
-  await writeStore(deps.workspace, { ...store.state, updatedAt: now, references })
-  if (quarantine !== undefined) {
-    await writeQuarantine(deps.workspace, { ...quarantine, updatedAt: now, entries })
-  }
-  const shown = report.slice(0, 10)
-  return {
-    kind: 'success',
-    text: [
-      `enriched ${report.length} of ${looked} reference(s)`,
-      ...shown.map((line) => `  ${line}`),
-      ...(report.length > shown.length ? [`  …and ${report.length - shown.length} more`] : []),
-    ].join('\n'),
-  }
+  })
 }
 
 /** Execute one `/refs save|remove|export|list|edit` line. */

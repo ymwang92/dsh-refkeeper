@@ -45,6 +45,15 @@ function scopeLabelOf(raw: string): string {
   return 'error' in scope ? 'last capture' : describeScope(scope)
 }
 
+function oneLineError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  return message
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .slice(0, 240) || 'unknown error'
+}
+
 const PACKAGE_NAME = 'dsh-refkeeper'
 
 /** Cordis service key this plugin provides. */
@@ -971,6 +980,7 @@ function mount(ctx: Context) {
                 }
                 return await runStoreCommand(raw, storeDeps(cwd, invocation.signal))
               }
+              let batchPersistenceFailure: string | undefined
               const result = await runRefsCommand(
                 raw,
                 session,
@@ -1032,7 +1042,12 @@ function mount(ctx: Context) {
                       scope: scopeLabelOf(raw),
                       entries: annotated.entries,
                     }
-                    const persisted = await writeBatch(cwd, batch)
+                    let persisted = false
+                    try {
+                      persisted = await writeBatch(cwd, batch)
+                    } catch (error) {
+                      batchPersistenceFailure = oneLineError(error)
+                    }
                     const base = { ...summary, entries: annotated.entries }
                     const withBatch = persisted ? { ...base, batch } : base
                     return annotated.outcome === undefined
@@ -1041,7 +1056,11 @@ function mount(ctx: Context) {
                   },
                 },
               )
-              return result
+              if (batchPersistenceFailure === undefined) return result
+              return {
+                ...result,
+                text: `${result.text}\nBatch persistence failed: ${batchPersistenceFailure}`,
+              }
             },
           }),
         'dsh-refkeeper: /refs command',

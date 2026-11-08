@@ -1,13 +1,17 @@
-import { constants } from 'node:fs'
-import { copyFile, link, open, mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { createHash, randomInt } from 'node:crypto'
+import { mkdir, open, readFile, rename, rm } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 
 import { StoreError } from './types.ts'
 
 const LOCK_STALE_MS = 30_000
 const LOCK_TIMEOUT_MS = 5_000
 const LOCK_RETRY_MS = 20
+const LOCK_RECORD_BYTES = 256
+const JOURNAL_TAIL_BYTES = 512
+const heldLockDirectories = new AsyncLocalStorage<ReadonlySet<string>>()
 
 function sleep(ms: number): Promise<void> {
   // Deliberately *not* unref'd: while a caller waits for the lock this timer is
@@ -18,21 +22,133 @@ function sleep(ms: number): Promise<void> {
   })
 }
 
-/** Write `data` to `file` without ever exposing a half-written file.
+function digest(data: string): string {
+  return createHash('sha256').update(data, 'utf8').digest('hex')
+}
+
+function journalPath(file: string): string {
+  return `${file}.journal`
+}
+
+function snapshotPath(file: string, version: number): string {
+  return `${file}.v${String(version)}`
+}
+
+interface CommitRecord {
+  readonly version: number
+  readonly sha256: string
+}
+
+function parseJournal(text: string): CommitRecord[] {
+  const records: CommitRecord[] = []
+  const lines = text.split('\n')
+  if (!text.endsWith('\n')) lines.pop()
+  for (const line of lines) {
+    if (line.trim() === '') continue
+    try {
+      const parsed: unknown = JSON.parse(line)
+      if (
+        typeof parsed === 'object' &&
+        parsed !== null &&
+        'version' in parsed &&
+        typeof parsed.version === 'number' &&
+        Number.isSafeInteger(parsed.version) &&
+        parsed.version > 0 &&
+        'sha256' in parsed &&
+        typeof parsed.sha256 === 'string' &&
+        /^[a-f0-9]{64}$/u.test(parsed.sha256)
+      ) {
+        records.push({ version: parsed.version, sha256: parsed.sha256 })
+      }
+    } catch {
+      // An interrupted final append is not a commit. Earlier complete records
+      // remain authoritative and are intentionally left untouched.
+    }
+  }
+  return records
+}
+
+async function journalRecords(file: string): Promise<CommitRecord[]> {
+  try {
+    return parseJournal(await readFile(journalPath(file), 'utf8'))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
+}
+
+async function journalTailRecords(
+  file: string,
+): Promise<{ records: CommitRecord[]; complete: boolean }> {
+  let handle: FileHandle
+  try {
+    handle = await open(journalPath(file), 'r')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { records: [], complete: true }
+    throw error
+  }
+
+  try {
+    const { size } = await handle.stat()
+    const length = Math.min(size, JOURNAL_TAIL_BYTES)
+    const buffer = Buffer.alloc(length)
+    const { bytesRead } = length === 0
+      ? { bytesRead: 0 }
+      : await handle.read(buffer, 0, length, size - length)
+    const records = parseJournal(buffer.toString('utf8', 0, bytesRead))
+    if (records.length === 0 && size > length) {
+      // A corrupt/oversized tail may hide the most recent complete entry.
+      return { records: await journalRecords(file), complete: true }
+    }
+    return { records, complete: size <= length }
+  } finally {
+    await handle.close()
+  }
+}
+
+async function readCommittedSnapshot(file: string, records: readonly CommitRecord[]): Promise<string | undefined> {
+  for (const record of [...records].reverse()) {
+    try {
+      const data = await readFile(snapshotPath(file, record.version), 'utf8')
+      if (digest(data) === record.sha256) return data
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue
+      throw error
+    }
+  }
+  return undefined
+}
+
+/** Read a logical store file, resolving its latest complete immutable version.
  *
- * tmp file in the same directory -> fsync(tmp) -> rename(tmp, target) -> fsync(dir).
- * The directory fsync is what makes the rename durable across a crash; it is
- * best-effort because not every filesystem/OS allows it.
+ * Existing canonical files remain readable for migration/backward compatibility.
+ * The normal read inspects only a bounded journal tail; the complete journal is
+ * read only if recent snapshots fail validation and older commits are needed.
  */
-export async function writeFileAtomic(file: string, data: string): Promise<void> {
+export async function readFileAtomic(file: string): Promise<string> {
+  const tail = await journalTailRecords(file)
+  const recent = await readCommittedSnapshot(file, tail.records)
+  if (recent !== undefined) return recent
+
+  if (!tail.complete) {
+    const fallback = await readCommittedSnapshot(file, await journalRecords(file))
+    if (fallback !== undefined) return fallback
+  }
+  return readFile(file, 'utf8')
+}
+
+function usesVersionJournal(file: string): boolean {
+  return ['refs.json', 'quarantine.json', 'annotated.md', 'last-capture.json'].includes(basename(file))
+}
+
+async function writeWithRename(file: string, data: string): Promise<void> {
   const dir = dirname(file)
   await mkdir(dir, { recursive: true })
   const tmp = `${file}.${String(process.pid)}.${String(Date.now())}.tmp`
-  let handle
+  let handle: FileHandle | undefined
   try {
     handle = await open(tmp, 'w')
     await handle.writeFile(data, 'utf8')
-    await handle.sync()
     await handle.close()
     handle = undefined
     await rename(tmp, file)
@@ -44,14 +160,81 @@ export async function writeFileAtomic(file: string, data: string): Promise<void>
       `cannot write ${file}: ${error instanceof Error ? error.message : String(error)}`,
     )
   }
+}
+
+/** Persist refs data as an immutable snapshot and append a checksummed commit record.
+ *
+ * This avoids rename/unlink entirely for the files affected by the host sandbox.
+ * Until the journal record is complete, the previous committed version remains
+ * visible. Uncommitted snapshots are retained because unlink is forbidden.
+ */
+async function appendJournalRecord(file: string, record: CommitRecord): Promise<void> {
+  const handle = await open(journalPath(file), 'a+')
   try {
-    const dirHandle = await open(dir, 'r')
-    await dirHandle.sync().catch(() => undefined)
-    await dirHandle.close()
-  } catch {
-    // Directory fsync is an extra durability step; failing it does not
-    // invalidate the rename that already succeeded.
+    const { size } = await handle.stat()
+    let separator = ''
+    if (size > 0) {
+      const lastByte = Buffer.alloc(1)
+      const { bytesRead } = await handle.read(lastByte, 0, 1, size - 1)
+      if (bytesRead !== 1 || lastByte[0] !== 0x0a) separator = '\0\n'
+    }
+
+    const entry = `${separator}${JSON.stringify(record)}\n`
+    await handle.writeFile(entry, 'utf8')
+  } finally {
+    await handle.close()
   }
+}
+
+export async function writeFileAtomic(file: string, data: string): Promise<void> {
+  if (!usesVersionJournal(file)) {
+    await writeWithRename(file, data)
+    return
+  }
+  const dir = dirname(file)
+  await mkdir(dir, { recursive: true })
+  await serialize(file, async () => {
+    const tail = await journalTailRecords(file)
+    let version = Math.max(0, ...tail.records.map((record) => record.version)) + 1
+    let snapshot: string
+    let handle: FileHandle
+    for (;;) {
+      snapshot = snapshotPath(file, version)
+      try {
+        handle = await open(snapshot, 'wx')
+        break
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+        // Failed commits can leave an immutable snapshot without a journal
+        // record. Avoid linearly probing all prior orphan files: jump to a
+        // random safe integer and let O_EXCL confirm it is unused.
+        version = randomInt(1, 2 ** 48)
+      }
+    }
+
+    try {
+      // The journal record is the commit point. A crash before the complete
+      // newline-terminated append leaves this snapshot invisible; readers still
+      // validate the snapshot digest and fall back to the prior commit.
+      await handle.writeFile(data, 'utf8')
+    } catch (error) {
+      await handle.close().catch(() => undefined)
+      throw new StoreError(
+        'write-failed',
+        `cannot write ${file}: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+    await handle.close()
+
+    try {
+      await appendJournalRecord(file, { version, sha256: digest(data) })
+    } catch (error) {
+      throw new StoreError(
+        'write-failed',
+        `cannot commit ${file}: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+  })
 }
 
 export interface LockOptions {
@@ -60,178 +243,199 @@ export interface LockOptions {
   readonly retryMs?: number
 }
 
-/** Run `fn` while holding `refs/.lock`.
- *
- * Cross-process safety comes from `open(path, 'wx')` (O_EXCL). A crashed
- * holder leaves a stale lock behind, so age is checked and the file is stolen
- * after `staleMs`. Contention is surfaced as StoreError('lock-timeout')
- * instead of silently racing.
- *
- * Reclaiming a stale lock never unlinks `refs/.lock` by path: a path-based
- * delete races with another process taking the lock between our `stat` and our
- * `rm`. Instead the file is *renamed* to a private name, which is atomic and
- * moves whichever inode is actually there, and only then compared with the
- * inode we inspected. A mismatch means we grabbed somebody else's live lock,
- * which is put back with `link` (fails rather than overwrites). Release uses
- * the same helper, so a stale-steal that replaced our lock cannot be undone by
- * our own cleanup.
- */
-function claimName(lockPath: string): string {
-  return `${lockPath}.claim-${String(process.pid)}-${String(Date.now())}-${Math.random()
-    .toString(36)
-    .slice(2, 8)}`
+interface LockRecord {
+  readonly state: 'held' | 'released'
+  readonly pid: number
+  readonly token: string
+  readonly at: string
 }
 
-/** Put a renamed lock back in place without overwriting a newer one. */
-async function restoreClaim(claimPath: string, lockPath: string): Promise<void> {
-  try {
-    await link(claimPath, lockPath)
-    return
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') return
-  }
-  // Filesystems without hard links: COPYFILE_EXCL still refuses to clobber.
-  try {
-    await copyFile(claimPath, lockPath, constants.COPYFILE_EXCL)
-  } catch {
-    // A newer lock owns the path now; the one we hold is obsolete.
-  }
+function lockName(dir: string, generation: number): string {
+  return join(dir, generation === 0 ? '.lock' : `.lock.${String(generation)}`)
 }
 
-type UnlinkOutcome = 'removed' | 'raced' | 'missing'
-
-/** What identifies the lock we inspected: inode plus its exact bytes.
- *
- * A bare inode is not enough — the filesystem recycles inode numbers, so a
- * fresh lock can land on the number of the stale one we just stat'ed.
- */
-export interface LockIdentity {
-  readonly ino: number
-  readonly content: string
+function lockContent(record: LockRecord): string {
+  const serialized = JSON.stringify(record)
+  if (Buffer.byteLength(serialized, 'utf8') > LOCK_RECORD_BYTES) {
+    throw new Error('lock record exceeds fixed-size limit')
+  }
+  return serialized.padEnd(LOCK_RECORD_BYTES, ' ')
 }
 
-/** Remove `path` only if it still holds `expected`; never deletes blindly.
- *
- * Exported for the lock tests: the value of this function is the ordering it
- * enforces between the inode it moves and the inode it compares, which only a
- * direct test can pin down.
- */
-export async function unlinkIfSame(path: string, expected: LockIdentity): Promise<UnlinkOutcome> {
-  const claimPath = claimName(path)
+function parseLockRecord(content: string | undefined): LockRecord | undefined {
+  if (content === undefined) return undefined
   try {
-    await rename(path, claimPath)
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'raced'
-  }
-  try {
-    const claimed = await stat(claimPath).catch(() => undefined)
-    if (claimed === undefined) return 'missing'
-    const claimedContent = await readFile(claimPath, 'utf8').catch(() => undefined)
-    if (claimed.ino !== expected.ino || claimedContent !== expected.content) {
-      await restoreClaim(claimPath, path)
-      return 'raced'
+    const parsed: unknown = JSON.parse(content.trim())
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'state' in parsed &&
+      (parsed.state === 'held' || parsed.state === 'released') &&
+      'pid' in parsed &&
+      typeof parsed.pid === 'number' &&
+      'token' in parsed &&
+      typeof parsed.token === 'string' &&
+      'at' in parsed &&
+      typeof parsed.at === 'string'
+    ) {
+      return { state: parsed.state, pid: parsed.pid, token: parsed.token, at: parsed.at }
     }
-    await rm(claimPath, { force: true })
-    return 'removed'
-  } finally {
-    await rm(claimPath, { force: true }).catch(() => undefined)
+  } catch {
+    // A malformed recent lock is treated as held; age-based recovery handles
+    // crashes between O_EXCL creation and the initial record write.
+  }
+  return undefined
+}
+
+function processIsAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    // Only ESRCH proves the owner is gone. Unknown errors fail closed so a
+    // live lock is never reclaimed merely because the probe was inconclusive.
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
   }
 }
 
-/** Remove a stale lock only if it is still the exact file we inspected. */
-async function stealStaleLock(lockPath: string, seen: LockIdentity): Promise<boolean> {
-  return (await unlinkIfSame(lockPath, seen)) === 'removed'
+async function readLockContent(handle: FileHandle): Promise<string> {
+  const buffer = Buffer.alloc(LOCK_RECORD_BYTES)
+  const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+  return buffer.toString('utf8', 0, bytesRead)
 }
 
-const acquireQueues = new Map<string, Promise<unknown>>()
+async function lockIsReusable(handle: FileHandle, staleMs: number): Promise<boolean> {
+  const [info, content] = await Promise.all([handle.stat(), readLockContent(handle)])
+  const record = parseLockRecord(content)
+  if (record?.state === 'released') return true
+  const age = Date.now() - info.mtimeMs
+  if (age <= staleMs) return false
+  if (record?.state === 'held' && processIsAlive(record.pid)) return false
+  return true
+}
 
-/** Serialize lock *acquisition* per path inside this process.
+async function writeLockContent(handle: FileHandle, content: string): Promise<void> {
+  const { bytesWritten } = await handle.write(content, 0, 'utf8')
+  if (bytesWritten !== Buffer.byteLength(content, 'utf8')) {
+    throw new Error('short lock record write')
+  }
+}
+
+async function markReleased(handle: FileHandle, token: string): Promise<void> {
+  const content = lockContent({ state: 'released', pid: process.pid, token, at: new Date().toISOString() })
+  await writeLockContent(handle, content)
+}
+
+interface HeldLock {
+  readonly path: string
+  readonly handle: FileHandle
+  readonly token: string
+}
+
+async function acquireLock(dir: string, staleMs: number): Promise<HeldLock | undefined> {
+  for (let generation = 0; ; generation += 1) {
+    const path = lockName(dir, generation)
+    let handle: FileHandle
+    let created = false
+    try {
+      handle = await open(path, 'wx+')
+      created = true
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      try {
+        handle = await open(path, 'r+')
+      } catch (openError) {
+        if ((openError as NodeJS.ErrnoException).code === 'ENOENT') continue
+        throw openError
+      }
+      try {
+        if (!(await lockIsReusable(handle, staleMs))) {
+          await handle.close()
+          return undefined
+        }
+      } catch (readError) {
+        await handle.close().catch(() => undefined)
+        throw readError
+      }
+    }
+
+    const token = `${String(process.pid)}-${String(Date.now())}-${Math.random().toString(36).slice(2)}`
+    try {
+      const content = lockContent({ state: 'held', pid: process.pid, token, at: new Date().toISOString() })
+      await writeLockContent(handle, content)
+      const confirmed = parseLockRecord(await readLockContent(handle))
+      if (confirmed?.state !== 'held' || confirmed.token !== token) {
+        await handle.close()
+        // If another owner won the reuse race, wait for that owner rather than
+        // taking a later generation and entering the same critical section.
+        if (confirmed?.state === 'held') return undefined
+        continue
+      }
+      return { path, handle, token }
+    } catch (error) {
+      if (created) await markReleased(handle, token).catch(() => undefined)
+      await handle.close().catch(() => undefined)
+      throw new StoreError(
+        'write-failed',
+        `cannot write store lock ${path}: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+  }
+}
+
+/** Run `fn` while holding an exclusive generation lock in `refs/`.
  *
- * Cross-process exclusion comes from `open(wx)`; this queue exists because the
- * stale-lock takeover moves a file before validating it, and two local callers
- * interleaving there can strand each other's fresh lock.
+ * The host denies rename/unlink, so release overwrites this lock's fixed-size
+ * record with `state: released`. Released generations are reclaimed in place
+ * after the token is checked, preventing unbounded lock-file growth. Lock
+ * records are coordination metadata, so writes are verified but not fsynced.
  */
-function withAcquireTurn<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  const previous = acquireQueues.get(key) ?? Promise.resolve()
-  const next = previous.then(fn, fn)
-  acquireQueues.set(
-    key,
-    next.catch(() => undefined),
-  )
-  return next
-}
-
-type Attempt = 'acquired' | 'retry'
-
 export async function withStoreLock<T>(
   dir: string,
   fn: () => Promise<T>,
   options: LockOptions = {},
 ): Promise<T> {
-  const staleMs = options.staleMs ?? LOCK_STALE_MS
-  const timeoutMs = options.timeoutMs ?? LOCK_TIMEOUT_MS
-  const retryMs = options.retryMs ?? LOCK_RETRY_MS
-  await mkdir(dir, { recursive: true })
-  const lockPath = join(dir, '.lock')
-  const started = Date.now()
-  let handle: FileHandle | undefined
-  let owner: LockIdentity | undefined
+  const lockDir = resolve(dir)
+  const inheritedLocks = heldLockDirectories.getStore()
+  if (inheritedLocks?.has(lockDir) === true) return await fn()
 
-  for (;;) {
-    const attempt = await withAcquireTurn(lockPath, async (): Promise<Attempt> => {
-      try {
-        const content = `${String(process.pid)} ${new Date().toISOString()}\n`
-        handle = await open(lockPath, 'wx')
-        await handle.writeFile(content, 'utf8')
-        const ino = (await handle.stat()).ino
-        // A takeover may have moved our file out of the way between `open` and
-        // here; only a lock still sitting at the path means we own it.
-        const current = await stat(lockPath).catch(() => undefined)
-        if (current === undefined || current.ino !== ino) {
-          await handle.close().catch(() => undefined)
-          handle = undefined
-          return 'retry'
-        }
-        owner = { ino, content }
-        return 'acquired'
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-        const info = await stat(lockPath).catch(() => undefined)
-        const content = info === undefined ? undefined : await readFile(lockPath, 'utf8').catch(() => undefined)
-        if (info !== undefined && content !== undefined && Date.now() - info.mtimeMs > staleMs) {
-          await stealStaleLock(lockPath, { ino: info.ino, content })
-        }
-        return 'retry'
+  return await serialize(lockDir, async () => {
+    const staleMs = options.staleMs ?? LOCK_STALE_MS
+    const timeoutMs = options.timeoutMs ?? LOCK_TIMEOUT_MS
+    const retryMs = options.retryMs ?? LOCK_RETRY_MS
+    await mkdir(lockDir, { recursive: true })
+    const started = Date.now()
+    let held: HeldLock | undefined
+    while (held === undefined) {
+      held = await acquireLock(lockDir, staleMs)
+      if (held !== undefined) break
+      if (Date.now() - started > timeoutMs) {
+        throw new StoreError('lock-timeout', `refs store is locked by another process (${join(lockDir, '.lock')})`)
       }
-    })
-    if (attempt === 'acquired') break
-    if (Date.now() - started > timeoutMs) {
-      throw new StoreError('lock-timeout', `refs store is locked by another process (${lockPath})`)
+      await sleep(retryMs)
     }
-    await sleep(retryMs)
-  }
 
-  try {
-    return await fn()
-  } finally {
-    await handle?.close().catch(() => undefined)
-    // Only delete the lock we created; a stale-steal may have replaced it and
-    // removing a live holder's lock would let two writers in. `unlinkIfSame`
-    // renames before comparing, so it cannot remove a lock that arrived after
-    // its own check.
-    if (owner !== undefined) {
-      await unlinkIfSame(lockPath, owner).catch(() => undefined)
+    const activeLocks = new Set(inheritedLocks)
+    activeLocks.add(lockDir)
+    try {
+      return await heldLockDirectories.run(activeLocks, fn)
+    } finally {
+      // Detached async work can inherit this store; stop treating the key as
+      // held before releasing the physical lock.
+      activeLocks.delete(lockDir)
+      try {
+        await markReleased(held.handle, held.token)
+      } finally {
+        await held.handle.close().catch(() => undefined)
+      }
     }
-  }
+  })
 }
 
 const queues = new Map<string, Promise<unknown>>()
 
-/** Serialize operations on one store within this process.
- *
- * The file lock already excludes other processes; this keeps two concurrent
- * tool calls in the same host from both reading the same snapshot.
- */
+/** Serialize operations on one store within this process. */
 export function serialize<T>(key: string, fn: () => Promise<T>): Promise<T> {
   const previous = queues.get(key) ?? Promise.resolve()
   const next = previous.then(fn, fn)

@@ -1,8 +1,9 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { readFileAtomic } from '../src/store/atomic.ts'
 import { decodePayload, parseStoreCommand, runStoreCommand } from '../src/host/store-command.ts'
 import { payloadFlag } from '../src/ui/payload.ts'
 import type { VerificationReport } from '../src/verify/types.ts'
@@ -78,7 +79,7 @@ describe('saving through the encoded payload', () => {
       verify: () => Promise.resolve(VERIFIED),
     })
     expect(result.kind).toBe('success')
-    const raw = JSON.parse(await readFile(join(workspace, 'refs', 'refs.json'), 'utf8')) as {
+    const raw = JSON.parse(await readFileAtomic(join(workspace, 'refs', 'refs.json'))) as {
       references: Array<{ title: string; authors: Array<{ family: string; given?: string }> }>
     }
     expect(raw.references[0]?.title).toBe(TRICKY)

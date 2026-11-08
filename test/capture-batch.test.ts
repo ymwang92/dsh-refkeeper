@@ -41,6 +41,12 @@ describe('capture batch persistence', () => {
     expect(await readBatch(workspace)).toEqual(batch)
   })
 
+  it('propagates batch persistence failures instead of silently reporting success', async () => {
+    const journalDirectory = `${batchPath(workspace)}.journal`
+    await mkdir(journalDirectory, { recursive: true })
+    await expect(writeBatch(workspace, batch)).rejects.toThrow()
+  })
+
   it('treats a missing batch as absent, not as an error', async () => {
     expect(await readBatch(workspace)).toBeUndefined()
   })

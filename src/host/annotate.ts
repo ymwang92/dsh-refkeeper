@@ -1,7 +1,8 @@
 import type { BatchEntry } from './capture-batch.ts'
 import { usefulAnnotationText } from '../core/annotation-text.ts'
 import { stripMarkup } from '../core/text.ts'
-import { loadQuarantine, loadStore, writeQuarantine, writeStore } from '../store/io.ts'
+import { withStoreLock } from '../store/atomic.ts'
+import { loadQuarantine, loadStore, storePaths, writeQuarantine, writeStore } from '../store/io.ts'
 import type { RefAnnotation, StoredReference } from '../store/types.ts'
 
 /**
@@ -378,110 +379,112 @@ export async function annotateReferences(
     }
   }
 
-  const now = (deps.now?.() ?? new Date()).toISOString()
-  // Load first: whether an existing annotation is pure meta-commentary is a
-  // property of the stored row, not of the candidate passed in here.
-  const store = await loadStore(deps.workspace, { now })
-  const quarantine = await loadQuarantine(deps.workspace, { now })
-  const storedAnnotations = new Map<string, RefAnnotation | undefined>()
-  for (const stored of [...store.state.references, ...quarantine.entries]) {
-    storedAnnotations.set(stored.id, stored.annotation)
-  }
-  const answers = new Map(parsed.map((item) => [item.index, item]))
-  /** True when an annotation still says something after meta-commentary is removed. */
-  const usable = (annotation: RefAnnotation | undefined): boolean =>
-    annotation !== undefined &&
-    [annotation.summary, annotation.relevance, annotation.evidence, annotation.caveats].some(
-      (field) => usefulAnnotationText(field) !== '',
-    )
-  const wanted = new Map<string, { summary: string; relevance: string; evidence: string; caveats: string }>()
-  // Rows that only ever held "the excerpt does not cite this work" are cleaned
-  // here instead of being carried forward: a stale explanation of absence is
-  // exactly the text the user asked never to see again.
-  const drop = new Set<string>()
-  grounded.forEach(({ ref, excerpt }, index) => {
-    const previous = storedAnnotations.get(ref.id)
-    const stale = previous !== undefined && !usable(previous)
-    const answer = answers.get(index + 1)
-    if (answer === undefined) {
-      if (stale) drop.add(ref.id)
-      return
+  return withStoreLock(storePaths(deps.workspace).dir, async () => {
+    const now = (deps.now?.() ?? new Date()).toISOString()
+    // Load first: whether an existing annotation is pure meta-commentary is a
+    // property of the stored row, not of the candidate passed in here.
+    const store = await loadStore(deps.workspace, { now })
+    const quarantine = await loadQuarantine(deps.workspace, { now })
+    const storedAnnotations = new Map<string, RefAnnotation | undefined>()
+    for (const stored of [...store.state.references, ...quarantine.entries]) {
+      storedAnnotations.set(stored.id, stored.annotation)
     }
-    // The gate: a quote that is not in the transcript is a fabrication, so the
-    // evidence falls back to the line the work was actually found on.
-    const haystack = normalizeWhitespace(excerpt)
-    const quoted = answer.evidence
-    const verbatim = quoted.length >= 12 && haystack.toLowerCase().includes(quoted.toLowerCase())
-    const evidence = verbatim ? quoted : ''
-    if (answer.summary === '' && answer.relevance === '' && evidence === '' && answer.caveats === '') {
-      if (stale) drop.add(ref.id)
-      return
-    }
-    wanted.set(ref.id, {
-      summary: answer.summary,
-      relevance: answer.relevance,
-      evidence,
-      caveats: answer.caveats,
+    const answers = new Map(parsed.map((item) => [item.index, item]))
+    /** True when an annotation still says something after meta-commentary is removed. */
+    const usable = (annotation: RefAnnotation | undefined): boolean =>
+      annotation !== undefined &&
+      [annotation.summary, annotation.relevance, annotation.evidence, annotation.caveats].some(
+        (field) => usefulAnnotationText(field) !== '',
+      )
+    const wanted = new Map<string, { summary: string; relevance: string; evidence: string; caveats: string }>()
+    // Rows that only ever held "the excerpt does not cite this work" are cleaned
+    // here instead of being carried forward: a stale explanation of absence is
+    // exactly the text the user asked never to see again.
+    const drop = new Set<string>()
+    grounded.forEach(({ ref, excerpt }, index) => {
+      const previous = storedAnnotations.get(ref.id)
+      const stale = previous !== undefined && !usable(previous)
+      const answer = answers.get(index + 1)
+      if (answer === undefined) {
+        if (stale) drop.add(ref.id)
+        return
+      }
+      // The gate: a quote that is not in the transcript is a fabrication, so the
+      // evidence falls back to the line the work was actually found on.
+      const haystack = normalizeWhitespace(excerpt)
+      const quoted = answer.evidence
+      const verbatim = quoted.length >= 12 && haystack.toLowerCase().includes(quoted.toLowerCase())
+      const evidence = verbatim ? quoted : ''
+      if (answer.summary === '' && answer.relevance === '' && evidence === '' && answer.caveats === '') {
+        if (stale) drop.add(ref.id)
+        return
+      }
+      wanted.set(ref.id, {
+        summary: answer.summary,
+        relevance: answer.relevance,
+        evidence,
+        caveats: answer.caveats,
+      })
     })
-  })
-  if (wanted.size === 0 && drop.size === 0) {
-    return {
-      annotated: 0,
-      considered,
-      model: `${route.provider}/${route.model}`,
-      reason: 'the model returned no usable annotation for these entries',
-      ids: [],
+    if (wanted.size === 0 && drop.size === 0) {
+      return {
+        annotated: 0,
+        considered,
+        model: `${route.provider}/${route.model}`,
+        reason: 'the model returned no usable annotation for these entries',
+        ids: [],
+      }
     }
-  }
 
-  const touched: string[] = []
-  const annotatedIds: string[] = []
-  const apply = (list: readonly StoredReference[]): StoredReference[] =>
-    list.map((ref) => {
-      const next = wanted.get(ref.id)
-      const removeThis = drop.has(ref.id)
-      if (next === undefined && !removeThis) return ref
-      touched.push(ref.id)
-      if (next === undefined) {
-        const rest = { ...ref }
-        delete rest.annotation
-        return { ...rest, updatedAt: now }
+    const touched: string[] = []
+    const annotatedIds: string[] = []
+    const apply = (list: readonly StoredReference[]): StoredReference[] =>
+      list.map((ref) => {
+        const next = wanted.get(ref.id)
+        const removeThis = drop.has(ref.id)
+        if (next === undefined && !removeThis) return ref
+        touched.push(ref.id)
+        if (next === undefined) {
+          const rest = { ...ref }
+          delete rest.annotation
+          return { ...rest, updatedAt: now }
+        }
+        const annotation = mergeAnnotation(ref.annotation, next, now)
+        if (annotation === undefined) {
+          const rest = { ...ref }
+          delete rest.annotation
+          return { ...rest, updatedAt: now }
+        }
+        annotatedIds.push(ref.id)
+        return { ...ref, annotation, updatedAt: now }
+      })
+    const references = apply(store.state.references)
+    const entries = apply(quarantine.entries)
+    if (touched.length === 0) {
+      return {
+        annotated: 0,
+        considered,
+        model: `${route.provider}/${route.model}`,
+        reason: 'the annotated entries are no longer in the library',
+        ids: [],
       }
-      const annotation = mergeAnnotation(ref.annotation, next, now)
-      if (annotation === undefined) {
-        const rest = { ...ref }
-        delete rest.annotation
-        return { ...rest, updatedAt: now }
-      }
-      annotatedIds.push(ref.id)
-      return { ...ref, annotation, updatedAt: now }
-    })
-  const references = apply(store.state.references)
-  const entries = apply(quarantine.entries)
-  if (touched.length === 0) {
+    }
+    if (references !== store.state.references) {
+      await writeStore(deps.workspace, { ...store.state, updatedAt: now, references })
+    }
+    if (entries !== quarantine.entries) {
+      await writeQuarantine(deps.workspace, { ...quarantine, updatedAt: now, entries })
+    }
     return {
-      annotated: 0,
+      annotated: annotatedIds.length,
       considered,
       model: `${route.provider}/${route.model}`,
-      reason: 'the annotated entries are no longer in the library',
-      ids: [],
+      ...(annotatedIds.length === 0
+        ? { reason: 'the stored annotations only described the missing evidence, so they were removed' }
+        : {}),
+      ids: annotatedIds,
     }
-  }
-  if (references !== store.state.references) {
-    await writeStore(deps.workspace, { ...store.state, updatedAt: now, references })
-  }
-  if (entries !== quarantine.entries) {
-    await writeQuarantine(deps.workspace, { ...quarantine, updatedAt: now, entries })
-  }
-  return {
-    annotated: annotatedIds.length,
-    considered,
-    model: `${route.provider}/${route.model}`,
-    ...(annotatedIds.length === 0
-      ? { reason: 'the stored annotations only described the missing evidence, so they were removed' }
-      : {}),
-    ids: annotatedIds,
-  }
+  })
 }
 
 /**

@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { readFileAtomic, writeFileAtomic } from '../src/store/atomic.ts'
 import {
   coerceReference,
   loadQuarantine,
@@ -12,6 +14,16 @@ import {
 } from '../src/store/io.ts'
 import { StoreError } from '../src/store/types.ts'
 import type { StoredReference } from '../src/store/types.ts'
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return {
+    ...actual,
+    rename: vi.fn(async () => {
+      throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+    }),
+  }
+})
 
 const NOW = '2026-10-28T12:00:00.000Z'
 
@@ -44,8 +56,11 @@ function ref(overrides: Record<string, unknown> = {}): StoredReference {
 describe('store round trip', () => {
   it('writes refs/refs.json with a schema version and reads it back', async () => {
     await saveReference(workspace, ref(), { now: NOW })
-    const file = await readFile(join(workspace, 'refs', 'refs.json'), 'utf8')
+    const logicalPath = join(workspace, 'refs', 'refs.json')
+    const file = await readFileAtomic(logicalPath)
     const parsed = JSON.parse(file) as { schemaVersion: number; references: unknown[] }
+    expect(await readFile(`${logicalPath}.v1`, 'utf8')).toBe(file)
+    expect(await readFile(`${logicalPath}.journal`, 'utf8')).toContain('"version":1')
     expect(parsed.schemaVersion).toBe(1)
     expect(parsed.references).toHaveLength(1)
 
@@ -126,11 +141,103 @@ describe('store round trip', () => {
     expect(loaded.state.references).toHaveLength(2)
   })
 
-  it('leaves no temporary files behind', async () => {
+  it('commits a complete immutable file without rename and keeps the logical file readable', async () => {
     await saveReference(workspace, ref(), { now: NOW })
-    const entries = await readdir(storePaths(workspace).dir)
+    const paths = storePaths(workspace)
+    const logical = await readFileAtomic(paths.refs)
+    const committed = JSON.parse(logical) as { schemaVersion: number; references: unknown[] }
+    expect(committed.schemaVersion).toBe(1)
+    expect(committed.references).toHaveLength(1)
+    expect(await readFile(`${paths.refs}.v1`, 'utf8')).toBe(logical)
+    const entries = await readdir(paths.dir)
+    expect(entries).toContain('refs.json.journal')
+    expect(entries).toContain('refs.json.v1')
     expect(entries.filter((name) => name.endsWith('.tmp'))).toEqual([])
-    expect(entries).toContain('refs.json')
+  })
+
+  it('keeps the prior commit visible when an uncommitted snapshot is partial', async () => {
+    const file = storePaths(workspace).refs
+    await writeFileAtomic(file, 'complete prior value')
+    await writeFile(`${file}.v2`, 'partial value')
+
+    await expect(readFileAtomic(file)).resolves.toBe('complete prior value')
+  })
+
+  it('recovers from a torn journal tail without exposing a partial value', async () => {
+    const file = storePaths(workspace).refs
+    await writeFileAtomic(file, 'complete prior value')
+    await writeFile(`${file}.v2`, 'partial value')
+    await writeFile(`${file}.journal`, '{"version":2,"sha256":"incomplete', { flag: 'a' })
+
+    await expect(readFileAtomic(file)).resolves.toBe('complete prior value')
+    await writeFileAtomic(file, 'complete next value')
+    await expect(readFileAtomic(file)).resolves.toBe('complete next value')
+    const journalRecords = (await readFile(`${file}.journal`, 'utf8'))
+      .split('\n')
+      .filter(Boolean)
+      .flatMap((line) => {
+        try {
+          return [JSON.parse(line) as { version: number }]
+        } catch {
+          return []
+        }
+      })
+    const latestVersion = journalRecords.at(-1)?.version
+    expect(latestVersion).toBeDefined()
+    expect(await readFile(`${file}.v${latestVersion}`, 'utf8')).toBe('complete next value')
+  })
+
+  it('ignores a valid journal record without its terminating newline', async () => {
+    const file = storePaths(workspace).refs
+    const prior = 'complete prior value'
+    const uncommitted = 'complete snapshot without commit delimiter'
+    await writeFileAtomic(file, prior)
+    await writeFile(`${file}.v2`, uncommitted)
+    const sha256 = createHash('sha256').update(uncommitted, 'utf8').digest('hex')
+    await writeFile(`${file}.journal`, JSON.stringify({ version: 2, sha256 }), { flag: 'a' })
+
+    await expect(readFileAtomic(file)).resolves.toBe(prior)
+  })
+
+  it('poisons a valid unterminated journal record before committing a later write', async () => {
+    const file = storePaths(workspace).refs
+    const prior = 'prior committed value'
+    const orphan = 'valid but uncommitted snapshot'
+    await writeFileAtomic(file, prior)
+    await writeFile(`${file}.v2`, orphan)
+    const orphanRecord = {
+      version: 2,
+      sha256: createHash('sha256').update(orphan, 'utf8').digest('hex'),
+    }
+    await writeFile(`${file}.journal`, JSON.stringify(orphanRecord), { flag: 'a' })
+
+    await writeFileAtomic(file, 'new committed value')
+    const journal = await readFile(`${file}.journal`, 'utf8')
+    expect(journal).toContain(`${JSON.stringify(orphanRecord)}\u0000\n`)
+
+    const committed = journal
+      .split('\n')
+      .flatMap((line) => {
+        try {
+          return [JSON.parse(line) as { version: number }]
+        } catch {
+          return []
+        }
+      })
+      .at(-1)
+    expect(committed).toBeDefined()
+    await writeFile(`${file}.v${committed?.version}`, 'damaged new snapshot')
+    await expect(readFileAtomic(file)).resolves.toBe(prior)
+  })
+
+  it('propagates non-ENOENT snapshot read errors instead of falling back', async () => {
+    const file = storePaths(workspace).refs
+    await writeFileAtomic(file, 'committed version')
+    await writeFile(file, 'legacy canonical fallback')
+    await rm(`${file}.v1`)
+    await mkdir(`${file}.v1`)
+
+    await expect(readFileAtomic(file)).rejects.toMatchObject({ code: 'EISDIR' })
   })
 })
 
@@ -150,6 +257,20 @@ describe('store migration and damage', () => {
     expect(loaded.backupPath).toBeDefined()
     const backup = await readFile(loaded.backupPath ?? '', 'utf8')
     expect(backup).toContain('Legacy row')
+  })
+
+  it('backs up a journal-backed legacy payload before migrating without a canonical file', async () => {
+    const source = storePaths(workspace).refs
+    const legacy = JSON.stringify([
+      { title: 'Versioned legacy row', year: 2001, identifiers: { doi: '10.1000/versioned-legacy' } },
+    ])
+    await writeFileAtomic(source, legacy)
+
+    const loaded = await loadStore(workspace, { now: NOW })
+    expect(loaded.migrated).toBe(true)
+    expect(loaded.state.references[0]?.title).toBe('Versioned legacy row')
+    expect(loaded.backupPath).toBe(`${source}.bak-2026-10-28T12-00-00-000Z`)
+    await expect(readFile(loaded.backupPath ?? '', 'utf8')).resolves.toBe(legacy)
   })
 
   it('refuses a future schema version', async () => {
@@ -248,7 +369,7 @@ describe('annotated.md', () => {
     )
     if (!filler) throw new Error('fixture did not coerce')
     await saveReference(workspace, filler, { now: NOW })
-    const rendered = await readFile(join(workspace, 'refs', 'annotated.md'), 'utf8')
+    const rendered = await readFileAtomic(join(workspace, 'refs', 'annotated.md'))
     expect(rendered).toContain('**Summary** — A gridded climate dataset.')
     // The caveat was pure meta-commentary, so the line is absent rather than blank.
     expect(rendered).not.toContain('**Caveats**')
