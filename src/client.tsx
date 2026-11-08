@@ -27,6 +27,8 @@ import * as React from 'react'
 import { BATCH_MARKER, decodeBatch } from './core/batch.ts'
 import type { BatchEntry, CaptureBatch } from './core/batch.ts'
 import { parseAuthorLines } from './ui/authors.ts'
+import { cachedCommandSnapshot, entryReasonForMeta, parseManualSaveResult } from './ui/save-result.ts'
+import type { CommandSnapshotCache, ManualSaveResult } from './ui/save-result.ts'
 import { decodeDir } from './core/panel.ts'
 import type { DirectorySetting } from './core/panel.ts'
 import { encodeFlag } from './ui/payload.ts'
@@ -277,7 +279,7 @@ function entryMeta(entry: BatchEntry, text: Strings): string {
   const author = authors.length === 1 ? authors[0] : authors.length === 2
     ? `${authors[0]} ${text.authorConjunction} ${authors[1]}`
     : authors.length > 2 ? `${authors[0]} et al.` : ''
-  return [author, entry.fields?.year === undefined ? '' : String(entry.fields.year), entry.fields?.containerTitle ?? '', entry.reason ?? '']
+  return [author, entry.fields?.year === undefined ? '' : String(entry.fields.year), entry.fields?.containerTitle ?? '', entryReasonForMeta(entry.status, entry.reason) ?? '']
     .filter((part): part is string => typeof part === 'string' && part.trim() !== '').join(' · ')
 }
 
@@ -360,283 +362,481 @@ function patchOf(entry: BatchEntry, draft: Record<string, string>): Record<strin
   return patch
 }
 
-/** Zotero-style field list for one captured reference, editable in place. */
+type PanelView =
+  | { readonly kind: 'list' }
+  | { readonly kind: 'detail'; readonly id: string; readonly mode: 'edit' | 'create' }
+
+type ManualSaveOutcome = 'pending' | 'saved' | 'already' | 'quarantined' | 'unconfirmed'
+
+interface CommandEventSnapshot {
+  readonly revision: number
+  readonly size: number
+  readonly runs: readonly { readonly index: number; readonly commandId: string; readonly name: string; readonly args?: string }[]
+  readonly commands: readonly { readonly index: number; readonly commandId: string; readonly kind: 'success' | 'error'; readonly text?: string }[]
+}
+
+const EMPTY_COMMAND_SNAPSHOT = '{"revision":0,"size":0,"runs":[],"commands":[]}'
+
+function commandSnapshotOf(sessionId: string | undefined, cache: CommandSnapshotCache): string {
+  if (sessionId === undefined) {
+    cache.current = undefined
+    return EMPTY_COMMAND_SNAPSHOT
+  }
+  const source = sessionsNow()?.binding(sessionId)?.eventSource
+  const snapshot = source?.getSnapshot()
+  if (snapshot === undefined) {
+    cache.current = undefined
+    return EMPTY_COMMAND_SNAPSHOT
+  }
+  return cachedCommandSnapshot(cache, sessionId, snapshot.revision, snapshot.entries.length, () => {
+    const runs: Array<{ index: number; commandId: string; name: string; args?: string }> = []
+    const commands: Array<{ index: number; commandId: string; kind: 'success' | 'error'; text?: string }> = []
+    snapshot.entries.forEach((item, index) => {
+      const event = item as { readonly type?: unknown; readonly event?: { readonly type?: unknown; readonly data?: unknown } }
+      if (event.type !== 'event') return
+      const data = event.event?.data
+      if (typeof data !== 'object' || data === null) return
+      const command = data as { readonly commandId?: unknown; readonly name?: unknown; readonly args?: unknown; readonly kind?: unknown; readonly text?: unknown }
+      if (typeof command.commandId !== 'string') return
+      if (event.event?.type === 'command/run') {
+        if (typeof command.name !== 'string') return
+        runs.push({
+          index,
+          commandId: command.commandId,
+          name: command.name,
+          ...(typeof command.args === 'string' ? { args: command.args } : {}),
+        })
+        return
+      }
+      if (event.event?.type !== 'command/done' || (command.kind !== 'success' && command.kind !== 'error')) return
+      commands.push({
+        index,
+        commandId: command.commandId,
+        kind: command.kind,
+        ...(typeof command.text === 'string' ? { text: command.text } : {}),
+      })
+    })
+    return JSON.stringify({ revision: snapshot.revision, size: snapshot.entries.length, runs, commands })
+  })
+}
+
+function subscribeCommandEvents(sessionId: string | undefined, listener: () => void): () => void {
+  if (sessionId === undefined) return () => undefined
+  const source = sessionsNow()?.binding(sessionId)?.eventSource
+  if (source !== undefined) return source.subscribe(listener)
+  const timer = setInterval(listener, 1000)
+  return () => clearInterval(timer)
+}
+
+function useCommandEvents(sessionId: string | undefined): CommandEventSnapshot {
+  const cache = React.useRef<CommandSnapshotCache>({ current: undefined })
+  const raw = React.useSyncExternalStore(
+    (listener) => subscribeCommandEvents(sessionId, listener),
+    () => commandSnapshotOf(sessionId, cache.current),
+    () => EMPTY_COMMAND_SNAPSHOT,
+  )
+  return React.useMemo(() => JSON.parse(raw) as CommandEventSnapshot, [raw])
+}
+
+function createDraftOf(entry: BatchEntry): Record<string, string> {
+  const draft = draftOf(entry)
+  if (entry.fields?.title !== undefined) return draft
+  const title = entry.title.trim()
+  if (title === entry.doi || title === entry.arxivId || title === '—') draft.title = ''
+  return draft
+}
+
+function entryWithManualResult(entry: BatchEntry, payload: Record<string, unknown>, result: ManualSaveResult): BatchEntry {
+  const base = entry.fields ?? { type: 'journalArticle', title: entry.title, authors: [] }
+  const title = typeof payload['title'] === 'string' ? payload['title'] : base.title
+  const type = typeof payload['type'] === 'string' ? payload['type'] : base.type
+  const authors = Array.isArray(payload['authors'])
+    ? payload['authors'].filter((author): author is string => typeof author === 'string')
+    : base.authors
+  const fields = {
+    ...base,
+    ...payload,
+    type,
+    title,
+    authors,
+  } as NonNullable<BatchEntry['fields']>
+  return {
+    ...entry,
+    id: result.id,
+    status: result.status,
+    title,
+    fields,
+    ...(typeof payload['year'] === 'number' ? { year: payload['year'] } : {}),
+    ...(typeof payload['doi'] === 'string' && payload['doi'] !== '' ? { doi: payload['doi'] } : {}),
+    ...(typeof payload['arxivId'] === 'string' && payload['arxivId'] !== '' ? { arxivId: payload['arxivId'] } : {}),
+  }
+}
+
+function payloadFromDraft(draft: Record<string, string>): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    type: (REF_TYPES as readonly string[]).includes(draft['type'] ?? '') ? draft['type'] : 'journalArticle',
+    title: (draft['title'] ?? '').trim(),
+    year: Number(draft['year']),
+    authors: parseAuthorLines(draft['authors'] ?? ''),
+  }
+  for (const field of FIELDS) {
+    if (field.key === 'type' || field.key === 'title' || field.key === 'year' || field.key === 'authors') continue
+    const value = (draft[field.key] ?? '').trim()
+    if (value !== '') payload[field.key] = value
+  }
+  return payload
+}
+
 function EntryDetails(props: {
   readonly entry: BatchEntry
+  readonly rowKey: string
+  readonly mode: 'edit' | 'create'
   readonly text: Strings
-  readonly onSave: (id: string, patch: Record<string, unknown>, title?: string) => void
+  readonly onEdit: (id: string, patch: Record<string, unknown>, title?: string) => void
+  readonly onManualSave: (entry: BatchEntry, payload: Record<string, unknown>) => boolean
+  readonly onPromote: (entry: BatchEntry, manual: boolean) => void
+  readonly manualOutcome?: ManualSaveOutcome
+  readonly manualSaveDisabled: boolean
+  readonly onTitleRef: (element: HTMLTextAreaElement | null) => void
 }): React.ReactElement {
-  const { entry, text, onSave } = props
-  const [draft, setDraft] = React.useState<Record<string, string>>(() => draftOf(entry))
-  const [saved, setSaved] = React.useState(false)
-  const editable = entry.id !== undefined
+  const { entry, rowKey, mode, text, onEdit, onManualSave, onPromote, manualOutcome, manualSaveDisabled, onTitleRef } = props
+  const [draft, setDraft] = React.useState<Record<string, string>>(() => createDraftOf(entry))
+  const [validationError, setValidationError] = React.useState(false)
+  const [editNotice, setEditNotice] = React.useState(false)
 
-  const change = (key: string, value: string): void => {
-    setDraft((current) => ({ ...current, [key]: value }))
-    setSaved(false)
+  React.useEffect(() => {
+    setDraft(createDraftOf(entry))
+    setValidationError(false)
+    setEditNotice(false)
+  }, [entry])
+
+  const submit = (event: React.FormEvent<HTMLFormElement>): void => {
+    event.preventDefault()
+    if (mode === 'create') {
+      const authors = parseAuthorLines(draft['authors'] ?? '')
+      const year = Number(draft['year'])
+      const title = (draft['title'] ?? '').trim()
+      if (title === '' || authors.length === 0 || !Number.isInteger(year)) {
+        setValidationError(true)
+        return
+      }
+      const sent = onManualSave(entry, payloadFromDraft(draft))
+      setValidationError(false)
+      if (!sent) setEditNotice(true)
+      return
+    }
+    if (entry.id === undefined) return
+    const patch = patchOf(entry, draft)
+    if (Object.keys(patch).length === 0) {
+      setValidationError(false)
+      setEditNotice(true)
+      return
+    }
+    onEdit(entry.id, patch, (draft['title'] ?? '').trim() || undefined)
+    setValidationError(false)
+    setEditNotice(true)
   }
+
+  const outcomeText = manualOutcome === 'pending' ? text.manualSavePending
+    : manualOutcome === 'saved' ? `${text.manualSaveConfirmed} ${text.manualSaveNextCapture}`
+      : manualOutcome === 'already' ? `${text.manualSaveAlready} ${text.manualSaveNextCapture}`
+        : manualOutcome === 'quarantined' ? `${text.manualSaveQuarantined} ${text.manualSaveNextCapture}`
+          : manualOutcome === 'unconfirmed' ? text.manualSaveUnconfirmed
+            : editNotice ? (mode === 'edit' ? text.detailsSubmitted : text.unavailable)
+              : ''
+  const outcomeTone = manualOutcome === 'quarantined' ? UI_TOKENS.color.warning
+    : manualOutcome === 'unconfirmed' || editNotice ? UI_TOKENS.color.neutral : UI_TOKENS.color.success
+
+  const groupDefinitions = [
+    { key: 'identifiers', label: text.groupIdentifiers, fields: ['type', 'doi', 'arxivId', 'url'] },
+    { key: 'bibliography', label: text.groupBibliography, fields: ['title', 'authors', 'containerTitle', 'pages', 'language'] },
+    { key: 'publication', label: text.groupPublication, fields: ['year', 'volume', 'issue', 'publisher', 'publisherPlace'] },
+  ] as const
 
   return React.createElement(
     'div',
-    { style: { display: 'grid', gap: '4px', padding: '6px 0 8px 19px' } },
-    entry.fields === undefined && entry.id !== undefined
-      ? React.createElement(
-          'div',
-          { style: { opacity: 0.65, fontSize: '11px', lineHeight: 1.4 } },
-          text.detailsStale,
-        )
+    { style: { display: 'grid', gap: UI_TOKENS.layout.sectionGap, minWidth: 0 } },
+    entry.status === 'quarantined'
+      ? React.createElement('div', {
+          role: 'status',
+          style: { padding: UI_TOKENS.spacing.sm, borderRadius: UI_TOKENS.radius.panel, color: UI_TOKENS.color.warning, background: 'color-mix(in srgb, var(--dsw-alias-warning, #f59e0b) 14%, transparent)', fontSize: UI_TOKENS.fontSize.caption },
+        }, `⚠ ${text.quarantineNotice}${entry.reason ? ` ${entry.reason}` : ''}`)
       : null,
-    ...FIELDS.map((field) =>
-      React.createElement(
-        'label',
-        {
-          key: field.key,
-          style: { display: 'grid', gridTemplateColumns: '92px 1fr', gap: '6px', alignItems: 'start' },
-        },
-        // 11px + a 92px column is what lets 「作者（每行一个）」 sit on one line and
-        // its hint (“姓, 名”) on the next; pre-line honours the newline in the label.
-        React.createElement(
-          'span',
-          { style: { opacity: 0.7, fontSize: '11px', lineHeight: '1.35', whiteSpace: 'pre-line' } },
-          field.label(text),
-        ),
-        React.createElement(field.multiline === true ? 'textarea' : 'input', {
-          ...(field.multiline === true ? { rows: field.key === 'authors' ? 3 : 2 } : {}),
-          ...(field.key === 'authors' ? { placeholder: text.fieldAuthorsHint } : {}),
-          ...(field.numeric === true ? { inputMode: 'numeric' } : {}),
-          value: draft[field.key] ?? '',
-          disabled: !editable,
-          readOnly: !editable,
-          style: { width: '100%', font: 'inherit' },
-          onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-            change(field.key, event.target.value),
+    React.createElement(
+      'form',
+      { onSubmit: submit, style: { display: 'grid', gap: UI_TOKENS.layout.groupGap, minWidth: 0 } },
+      ...groupDefinitions.map((group) => React.createElement(
+        'section',
+        { key: group.key, style: { display: 'grid', gap: UI_TOKENS.layout.fieldGap, minWidth: 0 } },
+        React.createElement('h3', { style: { margin: 0, paddingBottom: UI_TOKENS.spacing.xs, borderBottom: '1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.2))', fontSize: UI_TOKENS.fontSize.control, fontWeight: 500 } }, group.label),
+        ...FIELDS.filter((field) => (group.fields as readonly string[]).includes(field.key)).map((field) => {
+          const value = draft[field.key] ?? ''
+          const label = field.label(text)
+          const onChange = (nextValue: string): void => setDraft((current) => ({ ...current, [field.key]: nextValue }))
+          let control: React.ReactElement
+          if (field.key === 'type') {
+            control = React.createElement('select', {
+              value: value || 'journalArticle',
+              onChange: (event: React.ChangeEvent<HTMLSelectElement>) => onChange(event.target.value),
+              style: FIELD_STYLE,
+            }, ...REF_TYPES.map((type) => React.createElement('option', { key: type, value: type }, type)))
+          } else if (field.multiline) {
+            control = React.createElement('textarea', {
+              ref: field.key === 'title' ? onTitleRef : undefined,
+              value,
+              rows: field.key === 'authors' ? 3 : 2,
+              onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => onChange(event.target.value),
+              style: { ...FIELD_STYLE, resize: 'vertical', minHeight: field.key === 'authors' ? '68px' : '48px' },
+            })
+          } else {
+            control = React.createElement('input', {
+              type: field.numeric ? 'number' : 'text',
+              min: field.numeric ? 0 : undefined,
+              max: field.numeric ? 9999 : undefined,
+              step: field.numeric ? 1 : undefined,
+              value,
+              onChange: (event: React.ChangeEvent<HTMLInputElement>) => onChange(event.target.value),
+              style: FIELD_STYLE,
+            })
+          }
+          return React.createElement(
+            'label',
+            { key: field.key, style: { display: 'grid', gap: UI_TOKENS.layout.labelGap, minWidth: 0, fontSize: UI_TOKENS.fontSize.caption } },
+            React.createElement('span', { style: { whiteSpace: 'pre-line', color: UI_TOKENS.color.neutral } }, label),
+            control,
+          )
         }),
+      )),
+      validationError ? React.createElement('div', { role: 'alert', style: { color: UI_TOKENS.color.warning, fontSize: UI_TOKENS.fontSize.caption } }, text.manualSaveValidation) : null,
+      outcomeText !== '' ? React.createElement('div', { role: 'status', style: { color: outcomeTone, fontSize: UI_TOKENS.fontSize.caption } }, outcomeText) : null,
+      entry.status === 'quarantined'
+        ? React.createElement('div', { style: { display: 'flex', gap: UI_TOKENS.layout.labelGap, flexWrap: 'wrap' } },
+            React.createElement('button', { type: 'button', onClick: () => onPromote(entry, false), style: BASE_BUTTON }, text.promoteVerify),
+            React.createElement('button', { type: 'button', onClick: () => onPromote(entry, true), style: BASE_BUTTON }, text.promoteManual))
+        : null,
+      React.createElement(
+        'div',
+        { style: { display: 'flex', gap: UI_TOKENS.layout.labelGap, flexWrap: 'wrap' } },
+        React.createElement('button', {
+          type: 'submit',
+          disabled: mode === 'create' && (manualOutcome === 'pending' || manualSaveDisabled),
+          style: BASE_BUTTON,
+        }, mode === 'create' ? text.manualSave : text.detailsSave),
+        React.createElement('button', {
+          type: 'button',
+          onClick: () => { setDraft(createDraftOf(entry)); setValidationError(false); setEditNotice(false) },
+          style: BASE_BUTTON,
+        }, text.detailsReset),
       ),
     ),
-    editable
-      ? React.createElement(
-          'div',
-          { style: { ...ROW_STYLE, gap: '8px' } },
-          React.createElement(
-            'button',
-            {
-              type: 'button',
-              onClick: () => {
-                const patch = patchOf(entry, draft)
-                if (Object.keys(patch).length === 0) return
-                const nextTitle = typeof patch['title'] === 'string' ? patch['title'] : undefined
-                onSave(entry.id as string, patch, nextTitle)
-                setSaved(true)
-              },
-            },
-            text.detailsSave,
-          ),
-          React.createElement(
-            'button',
-            {
-              type: 'button',
-              onClick: () => {
-                setDraft(draftOf(entry))
-                setSaved(false)
-              },
-            },
-            text.detailsReset,
-          ),
-          saved ? React.createElement('span', { style: { opacity: 0.7 } }, text.detailsSaved) : null,
-        )
-      : null,
   )
 }
 
-/** What the last capture actually did, entry by entry. */
-function BatchList(props: {
+interface PanelViewProps {
   readonly batch: CaptureBatch | undefined
   readonly text: Strings
+  readonly sessionId?: string
   readonly isPicked: (entry: BatchEntry) => boolean
   readonly onToggle: (id: string, next: boolean) => void
   readonly onEdit: (id: string, patch: Record<string, unknown>, title?: string) => void
   readonly onPromote: (entry: BatchEntry, manual: boolean) => void
-  readonly onManualSave: (entry: BatchEntry, payload: Record<string, unknown>) => void
+  readonly onManualSave: (entry: BatchEntry, payload: Record<string, unknown>) => boolean
   readonly titleOf: (entry: BatchEntry) => string
   readonly pickedCount: number
   readonly onRefresh: () => void
-}): React.ReactElement {
-  const { batch, text, isPicked, onToggle, onEdit, onPromote, onManualSave, titleOf, pickedCount, onRefresh } = props
-  const [openEntry, setOpenEntry] = React.useState<string | undefined>(undefined)
-  const [manualEntryKey, setManualEntryKey] = React.useState<string | undefined>(undefined)
-  const [manualDraft, setManualDraft] = React.useState({ title: '', doi: '', arxivId: '', year: '', author: '', type: 'journalArticle' })
+}
+
+function PanelView(props: PanelViewProps): React.ReactElement {
+  const { batch, text, sessionId, isPicked, onToggle, onEdit, onPromote, onManualSave, titleOf, pickedCount, onRefresh } = props
+  const [view, setView] = React.useState<PanelView>({ kind: 'list' })
+  const [updatedRows, setUpdatedRows] = React.useState<{ readonly batchKey: string; readonly rows: Readonly<Record<string, BatchEntry>> }>({ batchKey: '', rows: {} })
+  const [pendingSave, setPendingSave] = React.useState<{ readonly rowKey: string; readonly baselineSize: number; readonly expectedArgs: string; readonly commandId?: string; readonly batchKey: string; readonly entry: BatchEntry; readonly payload: Record<string, unknown> } | undefined>(undefined)
+  const [manualFeedback, setManualFeedback] = React.useState<{ readonly rowKey: string; readonly outcome: ManualSaveOutcome } | undefined>(undefined)
+  const commands = useCommandEvents(sessionId)
+  const listRef = React.useRef<HTMLDivElement | null>(null)
+  const titleRef = React.useRef<HTMLTextAreaElement | null>(null)
+  const triggerRefs = React.useRef(new Map<string, HTMLButtonElement>())
+  const restoreFocusKey = React.useRef<string | undefined>(undefined)
+  const restoreFocusOnList = React.useRef(false)
+  const listScrollTop = React.useRef(0)
+  const priorBatchKey = React.useRef('')
+  const batchKey = batch === undefined ? '' : `${batch.capturedAt}:${String(batch.entries.length)}`
+  const entries = batch === undefined ? [] : batch.entries.map((entry, index) =>
+    updatedRows.batchKey === batchKey ? updatedRows.rows[String(index)] ?? entry : entry,
+  )
+
+  React.useEffect(() => {
+    if (priorBatchKey.current === batchKey) return
+    priorBatchKey.current = batchKey
+    setView({ kind: 'list' })
+    setUpdatedRows({ batchKey, rows: {} })
+    setPendingSave(undefined)
+    setManualFeedback(undefined)
+  }, [batchKey])
+
+  React.useEffect(() => {
+    if (pendingSave === undefined) return
+    if (pendingSave.commandId === undefined) {
+      const run = commands.runs.find((event) =>
+        event.index >= pendingSave.baselineSize && event.name === 'refs' && event.args === pendingSave.expectedArgs,
+      )
+      if (run === undefined) return
+      setPendingSave((current) => current === pendingSave ? { ...current, commandId: run.commandId } : current)
+      return
+    }
+    const done = commands.commands.find((event) => event.commandId === pendingSave.commandId)
+    if (done === undefined) return
+    const result = done.kind === 'success' && done.text !== undefined ? parseManualSaveResult(done.text) : undefined
+    if (result === undefined) {
+      setManualFeedback({ rowKey: pendingSave.rowKey, outcome: 'unconfirmed' })
+      setPendingSave(undefined)
+      return
+    }
+    if (pendingSave.batchKey === batchKey) {
+      const next = entryWithManualResult(pendingSave.entry, pendingSave.payload, result)
+      setUpdatedRows((current) => {
+        const rows = current.batchKey === batchKey ? current.rows : {}
+        return { batchKey, rows: { ...rows, [pendingSave.rowKey]: next } }
+      })
+    }
+    setManualFeedback({ rowKey: pendingSave.rowKey, outcome: result.outcome })
+    setPendingSave(undefined)
+  }, [commands, pendingSave, batchKey])
+
+  const leaveDetail = (): void => {
+    restoreFocusOnList.current = true
+    setView({ kind: 'list' })
+  }
+
+  React.useEffect(() => {
+    if (view.kind === 'detail') {
+      const focusFrame = window.requestAnimationFrame(() => titleRef.current?.focus())
+      const handleKeyDown = (event: KeyboardEvent): void => {
+        if (event.key !== 'Escape') return
+        event.preventDefault()
+        leaveDetail()
+      }
+      window.addEventListener('keydown', handleKeyDown)
+      return () => {
+        window.cancelAnimationFrame(focusFrame)
+        window.removeEventListener('keydown', handleKeyDown)
+      }
+    }
+    if (!restoreFocusOnList.current) return
+    restoreFocusOnList.current = false
+    const focusKey = restoreFocusKey.current
+    const frame = window.requestAnimationFrame(() => {
+      if (focusKey !== undefined) triggerRefs.current.get(focusKey)?.focus()
+      if (listRef.current !== null) listRef.current.scrollTop = listScrollTop.current
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [view])
+
+  const openDetail = (entry: BatchEntry, index: number, mode: 'edit' | 'create', trigger: 'title' | 'manual'): void => {
+    const rowKey = String(index)
+    restoreFocusKey.current = `${rowKey}:${trigger}`
+    listScrollTop.current = listRef.current?.scrollTop ?? 0
+    setView({ kind: 'detail', id: rowKey, mode })
+  }
+
+  const submitManual = (entry: BatchEntry, payload: Record<string, unknown>, rowKey: string): boolean => {
+    if (pendingSave !== undefined) return false
+    const baselineSize = commands.size
+    // DSH command/run args preserve raw input after the command name, including separator whitespace.
+    const expectedArgs = manualSaveCommand(payload).slice('/refs'.length)
+    const submitted = onManualSave(entry, payload)
+    if (!submitted) {
+      setManualFeedback({ rowKey, outcome: 'unconfirmed' })
+      return false
+    }
+    setPendingSave({ rowKey, baselineSize, expectedArgs, batchKey, entry, payload })
+    setManualFeedback({ rowKey, outcome: 'pending' })
+    return true
+  }
+
+  if (view.kind === 'detail') {
+    const index = Number(view.id)
+    const entry = entries[index]
+    if (entry === undefined) {
+      return React.createElement('button', { type: 'button', onClick: leaveDetail, style: BASE_BUTTON }, text.detailBack)
+    }
+    const rowKey = String(index)
+    const title = titleOf(entry) === '' ? entry.doi ?? entry.arxivId ?? '—' : titleOf(entry)
+    const feedback = manualFeedback?.rowKey === rowKey ? manualFeedback.outcome
+      : pendingSave?.rowKey === rowKey ? 'pending' : undefined
+    return React.createElement(
+      'div',
+      { style: { display: 'grid', gap: UI_TOKENS.layout.sectionGap, minWidth: 0 } },
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: UI_TOKENS.layout.labelGap, minWidth: 0 } },
+        React.createElement('button', { type: 'button', onClick: leaveDetail, style: { ...BASE_BUTTON, flexShrink: 0 } }, `← ${text.detailBack}`),
+        React.createElement('strong', { style: { fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, view.mode === 'create' ? text.detailCreate : text.detailEdit)),
+      React.createElement('div', { title, style: { fontSize: UI_TOKENS.fontSize.control, fontWeight: 500, overflowWrap: 'anywhere' } }, title),
+      React.createElement('div', { style: { fontSize: UI_TOKENS.fontSize.caption, color: UI_TOKENS.color.neutral } }, entryMeta(entry, text)),
+      React.createElement(EntryDetails, {
+        key: `${rowKey}:${view.mode}`,
+        entry,
+        rowKey,
+        mode: view.mode,
+        text,
+        onEdit,
+        onManualSave: (currentEntry, payload) => submitManual(currentEntry, payload, rowKey),
+        onPromote,
+        manualOutcome: feedback,
+        manualSaveDisabled: pendingSave !== undefined,
+        onTitleRef: (element) => { titleRef.current = element },
+      }),
+    )
+  }
+
   if (batch === undefined) {
     return React.createElement(
       'div',
-      {
-        style: {
-          marginTop: '12px',
-          padding: '18px 14px',
-          textAlign: 'center',
-          border: '1px dashed var(--dsw-alias-border-l1, rgba(128,128,128,.35))',
-          borderRadius: UI_TOKENS.radius.panel,
-          background: 'var(--dsw-alias-bg-l1, rgba(128,128,128,.04))',
-          color: 'var(--dsw-alias-label-tertiary, inherit)',
-        },
-      },
-      React.createElement('div', { 'aria-hidden': true, style: { fontSize: '22px', marginBottom: '4px' } }, '⌕'),
+      { style: { marginTop: UI_TOKENS.spacing.md, padding: `${UI_TOKENS.spacing.lg} ${UI_TOKENS.spacing.md}`, textAlign: 'center', border: '1px dashed var(--dsw-alias-border-l1, rgba(128,128,128,.35))', borderRadius: UI_TOKENS.radius.panel, background: 'var(--dsw-alias-bg-l1, rgba(128,128,128,.04))', color: 'var(--dsw-alias-label-tertiary, inherit)' } },
+      React.createElement('div', { 'aria-hidden': true, style: { fontSize: '22px', marginBottom: UI_TOKENS.spacing.xs } }, '⌕'),
       React.createElement('div', { style: { fontSize: '13px', fontWeight: 500 } }, text.batchEmpty),
     )
   }
+
   return React.createElement(
     'div',
-    { style: { marginTop: '10px', display: 'grid', gap: UI_TOKENS.spacing.sm } },
-    React.createElement(
-      'div',
-      { style: { ...ROW_STYLE, justifyContent: 'space-between', gap: '8px' } },
-      React.createElement('span', { style: { fontWeight: 500 } }, `${text.batchHeading} · ${String(batch.entries.length)}`),
+    { ref: listRef, style: { marginTop: UI_TOKENS.spacing.md, display: 'grid', gap: UI_TOKENS.spacing.sm, minWidth: 0 } },
+    React.createElement('div', { style: { ...ROW_STYLE, justifyContent: 'space-between', gap: UI_TOKENS.spacing.sm } },
+      React.createElement('span', { style: { fontWeight: 500 } }, `${text.batchHeading} · ${String(entries.length)}`),
       React.createElement('div', { style: { ...ROW_STYLE, flexShrink: 0 } },
         React.createElement('span', { style: { opacity: 0.7, fontSize: UI_TOKENS.fontSize.caption } }, batch.scope),
-        React.createElement('button', { type: 'button', onClick: onRefresh, style: { ...BASE_BUTTON, padding: '3px 7px' } }, text.refresh)),
-    ),
+        React.createElement('button', { type: 'button', onClick: onRefresh, style: { ...BASE_BUTTON, padding: '3px 7px' } }, text.refresh))),
     React.createElement('div', { style: { fontSize: UI_TOKENS.fontSize.caption, color: UI_TOKENS.color.neutral } }, text.selectedCount.replace('{n}', String(pickedCount))),
-    ...batch.entries.map((entry, index) => {
-      const key = `${String(index)}:${entry.id ?? entry.title}`
+    ...entries.map((entry, index) => {
+      const rowKey = String(index)
       const title = titleOf(entry) === '' ? entry.doi ?? entry.arxivId ?? '—' : titleOf(entry)
-      const expandable = entry.id !== undefined
-      const expanded = openEntry === key
       const meta = entryMeta(entry, text)
-      return React.createElement(
-        'div',
-        {
-          key,
-          style: {
-            border: '1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.24))',
-            borderRadius: UI_TOKENS.radius.panel,
-            padding: '8px 9px',
-            background: 'var(--dsw-alias-bg-l1, rgba(128,128,128,.035))',
-            minWidth: 0,
-          },
-        },
-        React.createElement(
-          'div',
-          { style: { ...ROW_STYLE, gap: '7px', flexWrap: 'nowrap', minWidth: 0 } },
+      return React.createElement('div', {
+        key: rowKey,
+        style: { border: '1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.24))', borderRadius: UI_TOKENS.radius.panel, padding: `${UI_TOKENS.spacing.sm} ${UI_TOKENS.spacing.sm}`, background: 'var(--dsw-alias-bg-l1, rgba(128,128,128,.035))', minWidth: 0 },
+      },
+        React.createElement('div', { style: { ...ROW_STYLE, gap: UI_TOKENS.spacing.xs, flexWrap: 'nowrap', minWidth: 0 } },
           entry.id === undefined
             ? React.createElement('span', { style: { width: '13px', flexShrink: 0 } })
-            : React.createElement('input', {
-                type: 'checkbox',
-                checked: isPicked(entry),
-                title: text.exportSelection,
-                onChange: (event: React.ChangeEvent<HTMLInputElement>) => onToggle(entry.id as string, event.target.checked),
-                style: { flexShrink: 0, margin: 0 },
-              }),
-          React.createElement(
-            'span',
-            {
-              style: {
-                color: STATUS_TONE[entry.status],
-                flexShrink: 0,
-                whiteSpace: 'nowrap',
-                padding: '2px 7px',
-                borderRadius: '999px',
-                background: 'rgba(128,128,128,.12)',
-                backgroundColor: `color-mix(in srgb, ${STATUS_TONE[entry.status]} 14%, transparent)`,
-                fontSize: UI_TOKENS.fontSize.caption,
-              },
-            },
-            statusLabel(entry, text),
-          ),
-          entry.annotated === true
-            ? React.createElement('span', { title: text.annotated, style: { flexShrink: 0, opacity: 0.65 } }, '✎')
-            : null,
-          React.createElement(
-            expandable ? 'button' : 'span',
-            expandable
-              ? {
-                  type: 'button',
-                  'aria-expanded': expanded,
-                  onClick: () => setOpenEntry(expanded ? undefined : key),
-                  style: { flex: '1 1 auto', minWidth: 0, border: 'none', background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left', padding: 0, cursor: 'pointer' },
-                  title,
-                }
-              : { style: { flex: '1 1 auto', minWidth: 0 } },
-            React.createElement('span', { style: { display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, title),
-          ),
-          expandable ? React.createElement('span', { 'aria-hidden': true, style: { flexShrink: 0, opacity: 0.6 } }, expanded ? '⌄' : '›') : null,
+            : React.createElement('input', { type: 'checkbox', checked: isPicked(entry), title: text.exportSelection, onChange: (event: React.ChangeEvent<HTMLInputElement>) => onToggle(entry.id as string, event.target.checked), style: { flexShrink: 0, margin: 0 } }),
+          React.createElement('span', { style: { color: STATUS_TONE[entry.status], flexShrink: 0, whiteSpace: 'nowrap', padding: '2px 7px', borderRadius: '999px', background: `color-mix(in srgb, ${STATUS_TONE[entry.status]} 14%, transparent)`, fontSize: UI_TOKENS.fontSize.caption } }, statusLabel(entry, text)),
+          entry.annotated === true ? React.createElement('span', { title: text.annotated, style: { flexShrink: 0, opacity: 0.65 } }, '✎') : null,
+          React.createElement('button', {
+            type: 'button',
+            ref: (element: HTMLButtonElement | null): void => { const key = `${rowKey}:title`; if (element === null) triggerRefs.current.delete(key); else triggerRefs.current.set(key, element) },
+            onClick: () => openDetail(entry, index, entry.id === undefined ? 'create' : 'edit', 'title'),
+            style: { flex: '1 1 auto', minWidth: 0, border: 'none', background: 'transparent', color: 'inherit', font: 'inherit', textAlign: 'left', padding: 0, cursor: 'pointer' },
+            title,
+          }, React.createElement('span', { style: { display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, title)),
           entry.status === 'skipped'
             ? React.createElement('button', {
                 type: 'button',
-                onClick: () => {
-                  setManualEntryKey(manualEntryKey === key ? undefined : key)
-                  setManualDraft({ title: titleOf(entry), doi: entry.doi ?? '', arxivId: entry.arxivId ?? '', year: '', author: '', type: 'journalArticle' })
-                },
-                'aria-expanded': manualEntryKey === key,
+                ref: (element: HTMLButtonElement | null): void => { const key = `${rowKey}:manual`; if (element === null) triggerRefs.current.delete(key); else triggerRefs.current.set(key, element) },
+                onClick: () => openDetail(entry, index, 'create', 'manual'),
                 style: { ...BASE_BUTTON, flexShrink: 0, padding: '3px 7px' },
               }, text.manualOpen)
             : null,
         ),
-        meta === '' ? null : React.createElement('div', { title: meta, style: { margin: '4px 0 0 20px', fontSize: UI_TOKENS.fontSize.caption, lineHeight: 1.4, color: 'var(--dsw-alias-label-secondary, rgba(128,128,128,.82))', overflowWrap: 'anywhere' } }, meta),
-        manualEntryKey === key
-          ? React.createElement(
-              'form',
-              {
-                onSubmit: (event: React.FormEvent<HTMLFormElement>) => {
-                  event.preventDefault()
-                  const payload = {
-                    title: manualDraft.title.trim(),
-                    type: manualDraft.type,
-                    year: Number(manualDraft.year),
-                    authors: [manualDraft.author.trim()],
-                    ...(manualDraft.doi.trim() === '' ? {} : { doi: manualDraft.doi.trim() }),
-                    ...(manualDraft.arxivId.trim() === '' ? {} : { arxivId: manualDraft.arxivId.trim() }),
-                  }
-                  if (payload.title === '' || manualDraft.author.trim() === '' || manualDraft.year.trim() === '' || !Number.isInteger(payload.year)) return
-                  onManualSave(entry, payload)
-                  setManualEntryKey(undefined)
-                },
-                style: { display: 'grid', gap: '6px', margin: '8px 0 0 20px' },
-              },
-              ...([
-                ['title', text.fieldTitle, 'text', true],
-                ['doi', text.fieldDoi, 'text', false],
-                ['arxivId', text.fieldArxiv, 'text', false],
-                ['year', text.fieldYear, 'number', true],
-                ['author', text.fieldFirstAuthor, 'text', true],
-              ] as const).map(([field, label, inputType, required]) => React.createElement(
-                'label',
-                { key: field, style: { display: 'grid', gridTemplateColumns: '68px 1fr', gap: '6px', alignItems: 'center', fontSize: UI_TOKENS.fontSize.caption } },
-                React.createElement('span', null, label),
-                React.createElement('input', {
-                  type: inputType,
-                  min: inputType === 'number' ? 0 : undefined,
-                  max: inputType === 'number' ? 9999 : undefined,
-                  value: manualDraft[field],
-                  required,
-                  onChange: (event: React.ChangeEvent<HTMLInputElement>) => setManualDraft((value) => ({ ...value, [field]: event.target.value })),
-                  style: FIELD_STYLE,
-                }),
-              )),
-              React.createElement('label', { style: { display: 'grid', gridTemplateColumns: '68px 1fr', gap: '6px', alignItems: 'center', fontSize: UI_TOKENS.fontSize.caption } },
-                React.createElement('span', null, text.fieldType),
-                React.createElement('select', {
-                  value: manualDraft.type,
-                  onChange: (event: React.ChangeEvent<HTMLSelectElement>) => setManualDraft((value) => ({ ...value, type: event.target.value })),
-                  style: FIELD_STYLE,
-                }, ...REF_TYPES.map((type) => React.createElement('option', { key: type, value: type }, type))),
-              ),
-              React.createElement('button', { type: 'submit', disabled: manualDraft.title.trim() === '' || manualDraft.year.trim() === '' || manualDraft.author.trim() === '', style: { ...BASE_BUTTON, justifySelf: 'start' } }, text.manualSave),
-            )
-          : null,
-        expandable && expanded
-          ? React.createElement(
-              'div',
-              { style: { marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.2))' } },
-              React.createElement(EntryDetails, { entry, text, onSave: onEdit }),
-              entry.status === 'quarantined'
-                ? React.createElement(
-                    'div',
-                    { style: { display: 'flex', gap: '6px', padding: '8px 0 0 20px', flexWrap: 'wrap' } },
-                    React.createElement('button', { type: 'button', onClick: () => onPromote(entry, false), style: BASE_BUTTON }, text.promoteVerify),
-                    React.createElement('button', { type: 'button', onClick: () => onPromote(entry, true), style: BASE_BUTTON }, text.promoteManual),
-                  )
-                : null,
-            )
-          : null,
+        meta === '' ? null : React.createElement('div', { title: meta, style: { margin: `${UI_TOKENS.spacing.xs} 0 0 20px`, fontSize: UI_TOKENS.fontSize.caption, lineHeight: 1.4, color: 'var(--dsw-alias-label-secondary, rgba(128,128,128,.82))', overflowWrap: 'anywhere' } }, meta),
       )
     }),
   )
@@ -658,6 +858,10 @@ interface PanelProps {
  * React state update, and submitting in the same tick would snapshot the *old*
  * draft inside the submit transaction.
  */
+function manualSaveCommand(payload: Record<string, unknown>): string {
+  return `/refs save ${encodeFlag('payload', payload)}`
+}
+
 function dispatch(actions: InputActionsLike | undefined, line: string): boolean {
   if (actions === undefined) return false
   actions.setDraft(line)
@@ -929,7 +1133,7 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
         : null,
       scopeOption('all', text.scopeAll),
     ),
-    React.createElement(BatchList, {
+    React.createElement(PanelView, {
       batch,
       text,
       isPicked,
@@ -939,9 +1143,11 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
       titleOf,
       pickedCount: pickedIds.length,
       onRefresh: () => setNonce((value) => value + 1),
+      sessionId: props.sessionId,
       onManualSave: (_entry, payload) => {
-        run(`/refs save ${encodeFlag('payload', payload)}`)
-        setNotice(text.detailsSaved)
+        const submitted = dispatch(props.inputActions, manualSaveCommand(payload))
+        setNotice(submitted ? '' : text.unavailable)
+        return submitted
       },
     }),
     React.createElement(

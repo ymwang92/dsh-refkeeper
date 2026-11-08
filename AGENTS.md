@@ -1,13 +1,39 @@
 # dsh-refkeeper — 代理工作说明
 
-本文件是给任何在本仓库干活的代理（人或模型）看的入口。
+本文件是给任何在本仓库干活的代理（人或模型）看的入口。**只写不能违反的规则与当前待办。**
+每轮验收的详细记录在 [`docs/verification-log.md`](docs/verification-log.md)（历史附件，不是工作说明）。
+
+## 工程纪律
+
+这几条不是客套话，**每一条都对应本项目已经踩过的坑**。
+
+1. **先查根因，再改代码。** M1 的 `rename` EPERM 花了五轮才定位，实际只要在宿主进程里加一行
+   `console.error` 读 errno 就能拿到。**先复现、先拿到错误原文，再动手。**
+2. **区分源码缺陷与工具/部署故障。** 本机 DSH 的 macOS `sandbox-exec` 根本不可用
+   （见「已知宿主侧问题」第 1 条）—— 那是环境问题，不是插件问题。不要为了绕过环境去改产品代码。
+3. **复用已验证的组件与既有流程。** M1 自己重写了一套原子写，而 DSH 已发布同语义的
+   `@deepseek-ai/dsh-atomic-write`（在 `app.asar` 里，可读）。动手前先搜一遍宿主有没有现成实现。
+4. **避免投机性的抽象、配置与 fallback 系统。** 降级路径应该是「主路径失败时才走」，
+   而不是「无条件走降级」—— 后者让所有机器都为只有个别环境才存在的问题付代价。
+5. **外科手术式改动。** 每批的授权文件清单写死在下面，越界就停下来报告，不要自行扩大范围。
+6. **给观察到的失败加针对性回归测试。** 客户端逻辑目前零测试覆盖（见「当前待修」P4），
+   这是 P1/P2 两个缺陷漏网的直接原因。
+7. **保留无关的未提交文件与 Git 历史。** 本仓库里 `dev/gui-fill.*` 曾被误删。
+   不碰不在任务范围内的文件，不 amend 已有提交。
+8. **未经明确授权不得改动生产安全控制。** DSH 的「文件权限」设置是安全控制；
+   临时提权（例如切 `danger-full-access`）必须先问用户。
+9. **明确成功判据，验证后即停。** 「M1 完成」被连续声称过，实测仍有 15 个测试挂。
+   **不要在判据未达成时宣布完成。**
+10. **初次方案失败时重新评估假设，而不是不断叠加 workaround。** 隔离 HOME 的位置试过三个；
+    每次失败都要问「我原来的假设错在哪」。
+11. **交接的每个数字都必须可复现。** 自报过的「351 全过」「基准 0.307ms」都不可复现；
+    贴命令 + 贴原始输出，不要只贴结论。
 
 ## 当前任务：捕获面板 UI 改版
 
 **不要重新设计方案。** 已批准的实施稿在 [`docs/ui-polish-plan.md`](docs/ui-polish-plan.md)，
 视觉对照在 [`docs/ui-mockup.html`](docs/ui-mockup.html)（浏览器直接打开，左图 B2 目标 / 右图 B3 目标）。
-里面有全部现状诊断、决策、设计规格、文件级清单、验证判据和踩坑清单。
-**先完整读它们，再动手。** 本文件只列不能违反的硬约束，其余以实施稿为准。
+**先完整读它们，再动手。**
 
 ### 已定决策（不可推翻）
 
@@ -36,84 +62,59 @@
 
 ```
 npm run typecheck                                  # 0 error
-npx vitest run                                     # 全过
+npx vitest run --maxWorkers=1                      # 确定性全量门禁，全过
 npm run build && node --check lib/client.js        # 通过
 grep -c "jsx-runtime" lib/client.js                # → 0
 grep -c "choose"     lib/client.js                 # → 0
 ```
 
+**Vitest 全量门禁口径**：统一用 `npx vitest run --maxWorkers=1` 做确定性验收。默认并行运行是
+负载敏感的性能观察：并发压力用例在机器满载时可能超过 5 秒测试线，**不能据此判定功能失败，
+也不要为压掉这些负载超时去调测试 timeout**；性能结果单独记录。
+
 外加实施稿 §6.2 的 GUI 实证（V1–V12），截图留档。
 
-### 当前批次：M1（存储落盘）→ M2（视觉验收）
-
-B1 → B2 → B3 暂停。当前推进 **M1 → M2**：
+## 当前阶段：B3 已过 → 修 P1–P4 → M2 终验
 
 | 批次 | 内容 | 授权边界 |
 |---|---|---|
-| **M1** | 修 `refs/` 落盘失败（`writeFileAtomic` 在宿主沙箱下 rename/unlink 不可用） | **本项目唯一被授权破例触碰 `src/store/` 的批次** |
-| **M2** | 捕获面板视觉验收，逐条给 V1–V12 的 pass / fail / **未测** | **不改产品代码**，只产出验收记录与截图 |
-
-**M1 破例说明**：上面「不碰 src/core、src/host、src/store、src/export、src/verify、src/index.ts」
-这条约束对 M1 **不适用**。M1 只允许动 `src/store/atomic.ts` 及必要的 `src/store/io.ts`；
-其余目录（`src/host/`、`src/verify/`、`src/export/`、`src/core/`、`src/index.ts`、`src/client.tsx`、
-`src/ui/`）仍然**一律不碰**。发现不改 host 层就修不了时，**停下来报告，不要自行扩大范围**。
+| M1 | 修 `refs/` 落盘失败（宿主沙箱下 rename/unlink 不可用） | 已收口。**唯一破例触碰 `src/store/` 的批次** |
+| B3 | 详情视图独立化 + 三组分组 + 类型下拉 | 已收口。只动 `src/client.tsx`、`src/ui/` |
+| **P1–P4** | B3 验收暴露的四个缺陷（见下） | 只动 `src/client.tsx`、`src/ui/`（可新增模块）、`test/` |
+| M2 | V1–V12 终验，含 V9/V10/V11 | **不改产品代码**，只产出验收记录与截图 |
 
 **M2 的判定纪律**：没验到的断言写「**未测**」，不许写成「通过」。
 
-### 已知待修（2026-11-05 18:57 验收 B1+B2 发现，进 B3 前必须修掉）
+### 当前待修（P1–P4，全部在客户端边界内）
 
-B1 的 P1（作者解析回归）与 P2（悬空指令）**已修复并复验通过**。以下是 B2 验收新发现的。
+| # | 缺陷 | 修法要点 |
+|---|---|---|
+| **P1** | `status:'saved'` 的条目仍带 `reason:'quarantined'`（实测 `last-capture.json.v2`）→ 徽章「已入表」与副行「· quarantined」自相矛盾 | `entry.status === 'saved'` 时不渲染 reason。**不要改宿主侧 batch 写入** |
+| **P2** | `parseManualSaveResult` 只匹配 `saved\|updated`，但宿主 `store-command.ts:1357` 输出 `edited <id> → refs/…`；且只匹配 `refs.json` 不匹配 `quarantine.json` → **「保存修改」的结果解析不出来** | 正则补 `edited` 与 quarantine 路径 |
+| **P3** | `commandSnapshotOf` 每次调用都全量遍历事件流 + `JSON.stringify`，`useSyncExternalStore` 每次通知都调 → **O(N²)** | ref 缓存：仅当 `revision`/`size` 变化时重算 |
+| **P4** | 客户端逻辑**零测试覆盖**（354 个测试全在 core/store/host 层）→ P1/P2 正是这个缺口漏掉的 | 把纯逻辑抽到可测模块并补单测 |
 
-**P3（严重，功能不可用）——「手动入表」永远进不了主表。**
-表单只收 `{title, doi, arxivId}`，但宿主核验要求三项全中：
+### 待验收（M2）
 
-```
-coerceReference(payload)        → year=undefined, authors=[], type 强制 journalArticle
-yearMatches(undefined, X)       → false          （verify/match.ts:75）
-firstAuthorMatches([], X)        → false          （verify/match.ts:99）
-passed ≤ 1 → status='quarantined'                （verify/judge.ts:138）
-accepted = status==='verified' || status==='manual' → false
-→ 写入 refs/quarantine.json，不是主表
-```
+**V1–V8、V12 已在 B3 build 上实测通过**（见下表）。**V9 / V10 / V11 尚未测**：
+命令字面量、多作者解析、手动入表走 `/refs save`。
 
-按钮写着「手动入表」，实际只能产出隔离条目。**修法：表单补齐「年份 + 首作者 + 条目类型」**，
-让核验能拿 3/3；或把按钮降级为「补全后入表」并在表单里明示必填项。
+### 一个待决策项（不在本批范围）
 
-**P4（中）—— 新引入了一个宿主不存在的 CSS 变量。**
-`--dsw-alias-fg-muted` 在宿主 `app.asar` 里 **0 次出现**，每次都落在 fallback 上 —— 与 B1 修掉的
-是同一类 bug。出现在 `src/client.tsx` 的 478 行（空态卡）与 572 行（元信息副行）。
-**修法**：改用 `--dsw-alias-label-secondary` / `--dsw-alias-label-tertiary`（这两个宿主确实有）。
+M1 把「不可变版本快照 + 校验日志」做成了 refs 数据**唯一**的写路径。按工程纪律第 4 条，
+更合适的形态是「标准原子写（tmp + rename）优先，失败才降级」—— 否则正常机器上也要为
+只有个别环境才存在的问题付 1.6 倍写延迟与额外复杂度。
+**这个决定需要用户拍板，不要自行改动已收口的 M1。**
 
-**P5（轻）——「手动入表」按钮与表单提交按钮同文案。**
-`src/client.tsx` 569 行（打开表单）与 605 行（提交）都用 `text.manualSave`，点开后两个按钮长得一样。
-**修法**：拆成两个键，如 `manualOpen` / `manualSave`。
-
-**P6（轻）—— 手动表单的预填值与列表显示值不一致。**
-列表显示用 `titleOf(entry) === '' ? entry.doi ?? entry.arxivId ?? '—' : titleOf(entry)`，
-表单预填却直接用 `entry.title`。只识别到 DOI 的条目，表单标题框会被预填成 DOI 串而非留空。
-**修法**：与列表用同一个兜底取值函数；标题为空且无 DOI 时留空让用户手填。
-
-**P7（提示）—— 字体权重不统一**：空态卡用 `fontWeight: 600`，批次标题用 `<strong>`（默认 700），
-其余继承。目标稿是 500。统一成 500 更贴宿主。
-
-### 易踩的坑
-
-实施稿 §7 列了 7 条，其中最容易出错的两条：
-
-- `parseAuthors` 的分隔符**不含换行**，必须**逐行**调用后展平（实施稿 §3.5）。
-- batch 是**持久化快照**，手动入表后列表不会自动刷新，要客户端就地更新行状态（实施稿 §3.4）。
-
-## GUI 实证（2026-11-05 已打通，脚本可直接用）
-
-旧流程失效的原因：隔离 profile 随工作区重建丢失了。**下面这套是实测通过的版本。**
+## GUI 实证（2026-11-08 实测跑通的版本）
 
 ```bash
 CLI="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 REPO="/Users/ymwang/Documents/deepseek-harness/default-workspace/dsh-refkeeper"
-VH="$HOME/.dsh-refkeeper-verify"          # 隔离 HOME 放仓库外，凭据不进项目树
+VH="$REPO/.dsh-verify"          # 隔离 HOME 必须在仓库内，见「已知宿主侧问题」第 4 条
 EDGE="/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"
 
-# 1) 隔离 HOME + 凭据（关键：缺 DeepSeek 凭据就没有模型 → 输入框禁用 → 面板不出现）
+# 1) 隔离 HOME + 凭据（缺 DeepSeek 凭据就没有模型 → 输入框禁用 → 面板不出现）
 mkdir -p "$VH/.dsh"
 cp ~/.dsh/.credentials.yaml "$VH/.dsh/.credentials.yaml" && chmod 600 "$VH/.dsh/.credentials.yaml"
 
@@ -121,58 +122,93 @@ cp ~/.dsh/.credentials.yaml "$VH/.dsh/.credentials.yaml" && chmod 600 "$VH/.dsh/
 DSH_HOME="$VH/.dsh" "$CLI" refkeeper-web --from-default-profile web
 DSH_HOME="$VH/.dsh" "$CLI" plugin --profile refkeeper-web add "$REPO"
 
-# 3) 起 web（--no-open 免得弹浏览器；日志里拿 token）
+# 3) 启动前用【独立一条命令】删残留锁 —— 复合命令里的 rm 会被沙箱拦
+rm -f "$VH/.dsh/.credentials.yaml.lock"
+
+# 4) 起 web（--no-open 免得弹浏览器；日志里拿 token）
 cd "$REPO" && DSH_HOME="$VH/.dsh" "$CLI" --profile refkeeper-web --port 3099 --no-open
 #   → dsh web: http://127.0.0.1:3099/?token=XXXX
 
-# 4) 起 headless Edge（只留一个 target，不要 Page.reload）
+# 5) 起 headless Edge —— --no-sandbox 必须加，否则 Chromium 自己的沙箱起不来：
+#    SIGTRAP: sandbox initialization failed: Operation not permitted
 pkill -f "remote-debugging-port=9333"; rm -rf /tmp/dsh-edge
-"$EDGE" --headless=new --remote-debugging-port=9333 --user-data-dir=/tmp/dsh-edge \
-  --no-first-run --no-default-browser-check "http://127.0.0.1:3099/?token=XXXX" &
+"$EDGE" --headless=new --no-sandbox --disable-gpu --remote-debugging-port=9333 \
+  --user-data-dir=/tmp/dsh-edge --no-first-run --no-default-browser-check \
+  "http://127.0.0.1:3099/?token=XXXX" &
 
-# 5) 驱动
+# 6) 驱动
 node dev/gui-probe.mjs 9333 .e2e-panel.png     # 截图
 node dev/gui-eval.mjs 9333 "$(cat /tmp/expr.js)"   # 读 DOM（表达式放文件，避免 shell 吃掉引号）
 ```
 
-### 三个必须手动做的前置动作
+### 四个必须手动做的前置动作
 
 | 动作 | 为什么 |
 |---|---|
+| **删掉 `$DSH_HOME/.credentials.yaml.lock`**（独立一条命令） | 锁残留 → `connection` 插件 `unlink` 撞 EPERM → 启动失败，连带 7 个插件不激活 |
 | **选一个模型**（`DeepSeek-V4.1-Flash` / `DeepSeek-V4-Pro`） | 没选 → 发送按钮禁用 → 面板不出现。日志里出现 `model listing ... loaded 2 model(s)` 即凭据已生效 |
-| **先发一条消息建会话** | `conversation.composer.dock` 插槽**只在真实会话里挂载**；欢迎页 hero 上只有 `conversation.input.left`，所以按钮在、面板不在 |
+| **先发一条消息建会话** | `conversation.composer.dock` 插槽**只在真实会话里挂载**；欢迎页 hero 上只有 `conversation.input.left`，所以按钮在、面板不在。点一下捕获按钮也会触发挂载 |
 | **从斜杠命令补全菜单里选中 `refs`** | 面板的 `inputActions.setDraft` + `submit()` 在 web composer 里**不生效**（命令根本没进会话）；手动输入 `/refs` 会弹出「指令 → refs」菜单，选中后再补参数回车即可执行 |
 
-### 已实测通过的断言
+### B3 build 实测结果（2026-11-08，宿主 GUI）
 
-| # | 断言 | 实测值 |
-|---|---|---|
-| V1 | 面板宽度 | **420** ✓ |
-| V2 | `details` / `summary` 元素数 | **0** ✓ |
-| V12 | 面板内「选择文件夹」字样 | **无** ✓ |
+> P1–P4 修复后的 build 于 2026-11-08 16:20–17:00 复验，下表为**当前有效**的结果。
+> 批次含 3 条：`10.1126/science.1259855`（saved/verified，19 位作者）、`10.18653/v1/N19-1423`
+> （saved/verified，4 位作者）、`10.48550/arXiv.1706.03762`（quarantined）。
 
-### 尚未验证（需要条目才能测）
+| # | 断言 | 实测 | |
+|---|---|---|---|
+| V1 | 面板宽度 | `420` | ✅ |
+| V2 | `details`/`summary` 元素数 | `0` | ✅ |
+| V3 | 徽章 | 「已入表」`rgb(34,197,94)`；「⚠ 隔离」`rgb(245,158,11)`；底色均为 14% color-mix | ✅ |
+| V4 | 标题截断 | `text-overflow: ellipsis` + `nowrap` | ✅ |
+| V5 | 详情类型下拉 | `<select>`，`journalArticle`，7 个选项 = `REF_TYPES` | ✅ |
+| V6 | 详情三组分组 | 标识信息 / 书目信息 / 出版信息 | ✅ |
+| V7 | 副行 | saved 条目：`Steffen, Will et al. · 2015 · Science`（**无 reason**，P1 生效）；quarantined 条目：`Vaswani, A. et al. · 2017 · 48550/arXiv · quarantined`（**有 reason**） | ✅ |
+| V9 | 命令字面量 | `/refs capture --scope=all`（client.tsx:883-885）、`/refs save --payload=<base64url>`（:862）、`/refs export …`（:898）—— **一字未改**（静态验证） | ✅ |
+| V10 | 多作者解析 | `Steffen, Will et al.`（19 位）、`Devlin, J. et al.`（4 位）、`Vaswani, A. et al.`（3 位）—— 均正确折叠为「第一作者 et al.」 | ✅ |
+| V12 | 面板内「选择文件夹」字样 | 无 | ✅ |
+| V11 | 手动入表走 `/refs save` | **未测** —— 本轮批次里没有 skipped 条目（隔离条目是 quarantined），「手动入表」入口未触发 | ⚠️ |
 
-V3 徽章底色 / V4 标题截断 / V5 类型下拉 / V6 详情三组 / V7 reason 显示，
-都要求批次里**有真实条目**。当前阻塞见下方「已知宿主侧问题」。
+**V11 仍未测。** 要造出 skipped 条目需要一条**有作者与年份但没有标题**、且标题不会被抽取器
+从 DOI 前缀误取的引用（例如 `doi:10` 被当成了标题，见 quarantined 那条）。
 
-### 已知宿主侧问题（不是本次 UI 改版引入）
+### 截图现状
 
-> **第 1 条由 M1 修复。** M1 完成后回来把这一条标成「已修」。
+`docs/images/panel.png` 与 `docs/images/composer.png` 已按当前 build 重截（2026-11-08）。
+**`panel-en.png` 与 `composer-en.png` 仍是旧图** —— 英文版需要把宿主 locale 切成英文后重截
+（`src/ui/strings.ts` 的 `stringsFor(tag)` 由宿主 `ctx.get('locale')` 决定，宿主默认跟随系统中文；
+本机 web UI 里没找到语言切换入口）。
 
-1. **`refs/` 落盘失败**：`writeFileAtomic` 的 `open+write` 成功、`rename` 未完成 —— 目录里只剩
-   `*.tmp` 和 `.lock`，`refs.json` / `last-capture.json` 不存在 → `writeBatch` 返回 false →
-   **batch 不带 `refkeeper-batch:` 标记** → 客户端读不到批次，面板停在空态。
-   宿主暴露的 `HostFsLike` 只有 `writeText(createIfAbsent)`，**没有 rename / rm**。
-   验证：普通 node 进程在同一目录 rename 完全正常（`open+write/rename/unlink` 全 OK），
-   所以是宿主沙箱内的差异，不是文件系统权限问题。
-   **注意连锁伤害**：`.lock` 的释放同样依赖 rename/rm，锁残留会让下一次 capture 撞上
-   `lock-timeout`，M1 要一并处理。
-2. **DOI 抽取被回复文本污染**：模型回复里的 `[10 54–58 (2013) · 1038/nature12373](https://doi…)`
-   会让抽取器把 DOI 读成 `10 54–58 (2013) · 1038/nature12373`，该条目最终 `status: failed`。
-   要测出「已入表」条目，消息里得写成**带标题的完整引用**，别用裸 DOI。
+
+### 已知宿主侧问题（不是本项目引入）
+
+1. **本机 DSH 沙箱后端不可用** —— DSH 报
+   `sandbox mode "workspace-write" is requested but no sandbox backend is usable on this host …
+   Runner failure: sandbox-exec: sandbox_apply: Operation not permitted`。
+   macOS 的 `sandbox-exec` 在这台机器上起不来。**这一条解释了本项目历史上所有怪象**：
+   `rename`/`unlink` 返回 EPERM、`connection` 插件启动失败、模型的 bash 工具全挂。
+   **⇒ 本机只能验 slash command 路径**（插件自己执行，不经模型工具）；
+   全链路验证需要把 DSH 的「文件权限」切到 `danger-full-access`（UI 级设置，profile patch 里没有）——
+   **那是宿主环境问题，不要为了它改产品代码，也不要擅自改用户的权限设置。**
+2. **`refs/` 落盘**：宿主沙箱允许创建/覆盖/追加写，但 `rename` 与 `unlink` 返回 `EPERM`。
+   M1 已用「不可变版本快照 + SHA-256 校验日志」绕开，细节见 [`docs/store-fallback.md`](docs/store-fallback.md)。
+3. **DOI 抽取被回复文本污染**：模型回复里的 `[10 54–58 (2013) · 1038/nature12373](https://doi…)`
+   会让抽取器读出错误 DOI。要测出「已入表」条目，消息里得写成**带标题的完整引用**，别用裸 DOI。
+   `10.1029/2005WR006155` 是**死 DOI**，别拿它当测试样本。
+4. **隔离 HOME 必须在仓库内**（`dsh-refkeeper/.dsh-verify/.dsh`，已 gitignore）：
+   放在 `default-workspace/` 或 `$HOME/` 下时，`connection` 插件仍会撞 unlink EPERM。
+   真实 `~/.dsh/` 里没有残留锁，所以桌面应用一直正常。
+
+## 易踩的坑
+
+实施稿 §7 列了 7 条，其中最容易出错的两条：
+
+- `parseAuthors` 的分隔符**不含换行**，必须**逐行**调用后展平（实施稿 §3.5）。
+- batch 是**持久化快照**，手动入表后列表不会自动刷新，要客户端就地更新行状态（实施稿 §3.4）。
 
 ## 其他
 
+- 历史验收记录（含 M1 各轮结论与 P1–P4 的完整证据）：[`docs/verification-log.md`](docs/verification-log.md)。
 - 发布前必看 `docs/m4-gui-slot-verification.md`：里面有隔离 profile + CDP 驱动 GUI 实证的原始流程。
 - 改动用户可见界面时，`docs/images/panel.png` 与 `panel-en.png` 需要重新截图（README 两处都在引用）。

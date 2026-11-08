@@ -15,6 +15,12 @@ export const UI_TOKENS = {
     caption: '11px',
     control: '12px',
   },
+  layout: {
+    sectionGap: '16px',
+    groupGap: '12px',
+    fieldGap: '8px',
+    labelGap: '4px',
+  },
   color: {
     success: 'var(--dsw-alias-state-success-primary, #1a7f37)',
     warning: 'var(--dsw-alias-state-warn-primary, #b26a00)',

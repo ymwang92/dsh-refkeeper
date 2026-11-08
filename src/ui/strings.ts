@@ -43,6 +43,21 @@ export interface Strings {
   readonly detailsSaved: string
   readonly detailsStale: string
   readonly detailsReset: string
+  readonly manualSavePending: string
+  readonly manualSaveConfirmed: string
+  readonly manualSaveNextCapture: string
+  readonly manualSaveAlready: string
+  readonly manualSaveQuarantined: string
+  readonly manualSaveUnconfirmed: string
+  readonly detailsSubmitted: string
+  readonly manualSaveValidation: string
+  readonly groupIdentifiers: string
+  readonly groupBibliography: string
+  readonly groupPublication: string
+  readonly quarantineNotice: string
+  readonly detailBack: string
+  readonly detailCreate: string
+  readonly detailEdit: string
   readonly fieldType: string
   readonly fieldTitle: string
   readonly fieldAuthors: string
@@ -103,6 +118,21 @@ export const EN: Strings = {
   detailsStale:
     'This entry was captured before field snapshots existed, so only its title, year and id are known. Capture again to pull the full record from the registries.',
   detailsReset: 'Revert',
+  manualSavePending: 'Saving reference…',
+  manualSaveConfirmed: 'Reference saved to your library.',
+  manualSaveNextCapture: 'This update will be included in the next capture.',
+  manualSaveAlready: 'This reference is already in your library.',
+  manualSaveQuarantined: 'Reference saved to quarantine for review.',
+  manualSaveUnconfirmed: 'Save result could not be confirmed. Check the command output.',
+  detailsSubmitted: 'Edit command submitted.',
+  manualSaveValidation: 'Enter a title, at least one author, and a valid year.',
+  groupIdentifiers: 'Identifiers',
+  groupBibliography: 'Bibliographic details',
+  groupPublication: 'Publication',
+  quarantineNotice: 'This reference is quarantined and may be excluded from standard exports until verified.',
+  detailBack: 'Back to list',
+  detailCreate: 'Complete reference',
+  detailEdit: 'Edit reference',
   fieldType: 'Type',
   fieldTitle: 'Title',
   fieldAuthors: 'Authors (one per line)',
@@ -163,6 +193,21 @@ export const ZH: Strings = {
   detailsStale:
     '这条是较早捕获留下的，只存了标题、年份和标识，没有完整字段。重新捕获一次即可从 Crossref / OpenAlex 补全。',
   detailsReset: '还原',
+  manualSavePending: '正在保存条目…',
+  manualSaveConfirmed: '条目已保存到文献库。',
+  manualSaveNextCapture: '此更新将在下次捕获时持久化。',
+  manualSaveAlready: '该文献已在文献库中。',
+  manualSaveQuarantined: '条目已保存到隔离区，等待复核。',
+  manualSaveUnconfirmed: '无法确认保存结果，请检查命令输出。',
+  detailsSubmitted: '编辑命令已提交。',
+  manualSaveValidation: '请填写标题、至少一位作者和有效年份。',
+  groupIdentifiers: '标识信息',
+  groupBibliography: '书目信息',
+  groupPublication: '出版信息',
+  quarantineNotice: '该条目处于隔离状态；核验前可能不会包含在常规导出中。',
+  detailBack: '返回列表',
+  detailCreate: '补全文献信息',
+  detailEdit: '编辑文献',
   fieldType: '条目类型',
   fieldTitle: '标题',
   fieldAuthors: '作者（每行一个）',

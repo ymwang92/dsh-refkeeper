@@ -4,6 +4,7 @@ node_modules/
 .DS_Store
 coverage/
 .dsh-dev/
+.dsh-verify/
 .refkeeper/
 .e2e-workspace/
 .e2e-*.png

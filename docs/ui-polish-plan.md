@@ -1,6 +1,6 @@
 # 捕获面板 UI 改版方案 — 实施稿 v2
 
-状态：**方案已拍板，待实施。**
+状态：**方案已拍板；B1/B2 已交付；B3 客户端已实现，静态门禁通过，GUI 复验待完成。**
 基线：`main@ec5404f`（v0.1.2），`src/client.tsx` 1165 行。
 版本差异：v2 相比 v1，5 个待拍板项已全部定案，新增「手动入表」通路设计与 `authors.ts` 处置结论。
 
@@ -369,12 +369,84 @@ external 列表保持 `['react', 'react-dom', 'react/jsx-runtime']` 不变也无
 | 判据 | 命令 / 断言 |
 |---|---|
 | 类型零错误 | `npm run typecheck` → 0 error |
-| 现有用例不回退 | `npx vitest run` → 现有 16 文件 / 193 用例全过 |
-| 新增用例 | `test/ui-entry.test.ts` + 扩充后的 `test/ui-authors.test.ts` 全过 |
+| 确定性全量测试 | `npx vitest run --maxWorkers=1` → 全部测试通过；B3 基线 26 文件 / 354 测试，P1–P4 后 27 文件 / 365 测试 |
 | 产物可加载 | `npm run build` → `node --check lib/client.js` 通过 |
 | **无新增运行时依赖** | `grep -c "jsx-runtime" lib/client.js` → **0** |
 | 产物已更新 | `git status` 显示 `lib/client.js` 变更 |
 | 无 picker 通路 | `grep -c "choose" lib/client.js` → **0**（客户端不得引用任何 picker 命令） |
+| 无空白错误 | `git diff --check` → 通过 |
+
+**B3 静态结果（2026-11-08，含保存结果关联修复）**：`npm run typecheck` 通过；`npx vitest run --maxWorkers=1` 为 26 文件 / 354 测试全过（Start 13:46:47，Duration 3.58s）；`npm run build` 与 `node --check lib/client.js` 通过，`lib/client.js` 为 58,244 bytes；`grep -c "jsx-runtime" lib/client.js` 与 `grep -c "choose" lib/client.js` 均为 0。手动保存以基线后的 `command/run` 精确匹配 refs 名称与参数，再按相同 `commandId` 关联 `command/done`；无关事件不更新，面板保存串行化。M2 GUI 尚未执行，不能将 B2 的 V1–V12 历史结果记为本次通过。
+
+**P1–P4 静态结果（2026-11-08）**：P1 只在 `status === 'saved'` 时隐藏副行 reason；P2 新增 `edited` 主表及 quarantine 回执解析；P3 以 sessionId / revision / size 缓存事件快照，未改变 eventSource 语义或 1s fallback；P4 将纯解析、reason 与缓存逻辑抽至 `src/ui/save-result.ts` 并新增 11 项测试。无宿主 GUI 实测（本批按用户要求不运行）。以下为门禁命令及原始摘要：
+
+- `npm run typecheck`
+  ```text
+  > dsh-refkeeper@0.1.2 typecheck
+  > tsc -p tsconfig.json --noEmit
+  ```
+  退出码 0，无诊断。
+- 定向测试 `npx vitest run --maxWorkers=1 test/ui-save-result.test.ts`
+  ```text
+   RUN  v4.1.11 /Users/ymwang/Documents/deepseek-harness/default-workspace/dsh-refkeeper
+   ✓ test/ui-save-result.test.ts (11 tests) 5ms
+
+   Test Files  1 passed (1)
+        Tests  11 passed (11)
+     Start at  14:43:58
+     Duration  157ms (transform 27ms, setup 0ms, import 35ms, tests 5ms, environment 0ms)
+  ```
+- 全量测试 `npx vitest run --maxWorkers=1`
+  ```text
+   RUN  v4.1.11 /Users/ymwang/Documents/deepseek-harness/default-workspace/dsh-refkeeper
+
+   ✓ test/store-command.test.ts (53 tests) 125ms
+   ✓ test/store.test.ts (23 tests) 71ms
+   ✓ test/annotate.test.ts (11 tests) 43ms
+  stdout | test/lock.test.ts > store lock > reuses one generation across 4 writers and 6 rounds
+  [lock-perf] 4 writers x 6 rounds: 5.40, 5.25, 5.36, 5.29, 5.51, 5.28 ms; lock files: 1, 1, 1, 1, 1, 1
+   ✓ test/lock.test.ts (9 tests) 249ms
+   ✓ test/capture-save.integration.test.ts (2 tests) 17ms
+   ✓ test/capture-batch.test.ts (13 tests) 14ms
+   ✓ test/payload.test.ts (6 tests) 9ms
+   ✓ test/locale.test.ts (3 tests) 3ms
+   ✓ test/verify-lookup.test.ts (13 tests) 50ms
+   ✓ test/index-persistence.test.ts (1 test) 13ms
+   ✓ test/capture-save.test.ts (5 tests) 4ms
+   ✓ test/citations.test.ts (16 tests) 6ms
+   ✓ test/verify-clients.test.ts (16 tests) 5ms
+   ✓ test/candidates.test.ts (18 tests) 7ms
+   ✓ test/refs-command.test.ts (12 tests) 8ms
+   ✓ test/corpus-conformance.test.ts (8 tests) 8ms
+   ✓ test/pipeline.test.ts (3 tests) 7ms
+   ✓ test/verify-body.test.ts (27 tests) 6ms
+   ✓ test/ui-authors.test.ts (9 tests) 2ms
+   ✓ test/export.test.ts (15 tests) 6ms
+   ✓ test/verify-judge.test.ts (14 tests) 4ms
+   ✓ test/verify-match.test.ts (14 tests) 4ms
+   ✓ test/session-read.test.ts (22 tests) 5ms
+   ✓ test/identifiers.test.ts (20 tests) 4ms
+   ✓ test/ui-save-result.test.ts (11 tests) 3ms
+   ✓ test/verify-command.test.ts (10 tests) 3ms
+   ✓ test/scope.test.ts (11 tests) 3ms
+
+   Test Files  27 passed (27)
+        Tests  365 passed (365)
+     Start at  14:44:20
+     Duration  3.87s (transform 246ms, setup 0ms, import 604ms, tests 678ms, environment 1ms)
+  ```
+- `npm run build && node --check lib/client.js`
+  ```text
+  > dsh-refkeeper@0.1.2 build
+  > tsdown && node scripts/build-client.mjs
+  lib/index.js    234.57 kB │ gzip: 65.14 kB
+  lib/index.d.ts    4.05 kB │ gzip: 1.60 kB
+  ✔ Build complete in 660ms
+  dsh-refkeeper: client bundle written (59426 bytes)
+  ```
+  `node --check lib/client.js` 无输出，命令链退出码 0。
+- `grep -c "jsx-runtime" lib/client.js` → 原始计数 `0`；`grep -c "choose" lib/client.js` → 原始计数 `0`。两次 grep 因无匹配各自返回 1（预期），外层校验接受 0 或 1。
+- `git diff --check` 在本段写入后复跑，无输出（退出码 0）；`.gitignore` 保留 `.dsh-verify/`。
 
 ### 6.2 GUI 实证（沿用仓库现成流程，见 `docs/m4-gui-slot-verification.md`）
 
