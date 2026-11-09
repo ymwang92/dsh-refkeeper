@@ -19,7 +19,14 @@ The capture panel becomes a real panel, and the reference store survives hosts t
 dsh-refkeeper@0.1.3
 ```
 
-Upgrade from 0.1.2 by adding the version explicitly, then fully quit and reopen DSH. Your existing `refs/refs.json` and `refs/quarantine.json` are read as they are — the new journal only takes over on the next write.
+Or install the tarball attached to this release, or the repository itself:
+
+```sh
+dsh plugin add ./dsh-refkeeper-0.1.3.tgz
+dsh plugin add github:ymwang92/dsh-refkeeper
+```
+
+Upgrade from 0.1.2 by naming the version explicitly, then fully quit and reopen DSH. Your existing `refs/refs.json` and `refs/quarantine.json` are read as they are — the new journal only takes over on the next write.
 
 Full notes: [CHANGELOG.md](https://github.com/ymwang92/dsh-refkeeper/blob/main/CHANGELOG.md).
 
@@ -41,6 +48,13 @@ Full notes: [CHANGELOG.md](https://github.com/ymwang92/dsh-refkeeper/blob/main/C
 
 **安装**
 
-在 DSH 打开 设置 → 插件 → 添加插件，输入 `dsh-refkeeper@0.1.3`。从 0.1.2 升级要显式写版本号，装完完全退出 DSH 再打开。已有的 `refs/refs.json` 与 `refs/quarantine.json` 会照原样读取，新的校验日志要到下一次写入才开始接管。
+在 DSH 打开 设置 → 插件 → 添加插件，输入 `dsh-refkeeper@0.1.3`。也可以装本 release 附带的安装包，或直接装仓库：
+
+```sh
+dsh plugin add ./dsh-refkeeper-0.1.3.tgz
+dsh plugin add github:ymwang92/dsh-refkeeper
+```
+
+从 0.1.2 升级要显式写版本号，装完完全退出 DSH 再打开。已有的 `refs/refs.json` 与 `refs/quarantine.json` 会照原样读取，新的校验日志要到下一次写入才开始接管。
 
 完整更新记录：[CHANGELOG.md](https://github.com/ymwang92/dsh-refkeeper/blob/main/CHANGELOG.md)。

@@ -9,6 +9,7 @@ coverage/
 .e2e-workspace/
 .e2e-*.png
 refs/
+dsh-refkeeper-*.tgz
 
 # never commit 2FA recovery codes
 npm_recovery_codes.txt
