@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.1.3 — 2026-11-08
+
+The capture panel becomes a real panel, and the reference store survives hosts
+that refuse `rename` and `unlink`.
+
+- **The panel opens in the top-right corner**, anchored to the window instead of
+  floating over the transcript. It is rendered through a portal into
+  `document.body`, so a host container with a `transform` can no longer drag it
+  into the corner.
+- **Opening a row opens an independent edit page.** The fourteen fields used to
+  expand in place and push the list off screen; they now live on their own
+  page, grouped into identifiers, bibliography and publication, with a `Back to
+  list` link and the focus returning to the row you came from.
+- **Entry type is a dropdown** of the seven `REF_TYPES` values. It was a free
+  text field, so a typo produced an entry that failed silently at export time.
+- **Every row carries a badge** — saved, ⚠ quarantined, skipped, failed — so
+  the state is readable without opening anything, and the sub-line shows the
+  first author, the year, the venue and, when the check failed, why.
+- **The batch header says how many entries it holds**, and a `Refresh list`
+  action reloads it.
+- **Manual entry reuses the same form.** A skipped row can be completed with
+  the full metadata and stored; the old single-purpose form only collected five
+  fields and could never satisfy the host's own check.
+- **The library is written without `rename` or `unlink`.** Some hosts deny
+  both, which left the reference store unable to commit anything at all.
+  References now live in immutable versioned snapshots with a newline-delimited
+  SHA-256 journal as the commit point, so a half-written file is never visible
+  and an interrupted write falls back to the previous commit. A failed write is
+  reported instead of being swallowed.
+- **Saving from the panel is matched to its own command.** The result is paired
+  by command id and exact arguments, so an unrelated command, an error, or an
+  unrecognised reply no longer leaves the row claiming it was saved.
+- **A stored entry no longer shows a stale reason.** A row that was quarantined
+  and later stored kept the old `quarantined` note next to its "saved" badge.
+
 ## 0.1.2 — 2026-11-04
 
 Quarantined references can now be promoted, and the same work can no longer be

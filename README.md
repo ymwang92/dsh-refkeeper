@@ -6,7 +6,7 @@
 
 A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin. It reads a conversation, collects the papers that conversation cited, checks each paper against Crossref, OpenAlex, arXiv and DataCite, and exports the confirmed entries as BibTeX or RIS. Papers that fail the check go into a separate quarantine file instead of the library.
 
-![The capture panel above the composer](docs/images/panel-en.png)
+![The capture panel in the top-right corner](docs/images/panel-en.png)
 
 If this plugin saves you time, a star on GitHub helps other people find it. If you hit a bug or want a feature, open an issue — Chinese or English, either is fine. I read all of them and add the useful ones to the roadmap.
 
@@ -19,7 +19,7 @@ If this plugin saves you time, a star on GitHub helps other people find it. If y
 
 ## One button in the composer
 
-The interface gains exactly one thing: an item in the composer's tool row, standing next to the work-mode and model pickers. It reads `❝ Refs` (Chinese UI: `❝ 引用`). There is no sidebar, no toolbar and no floating widget — press it and the capture panel opens above the composer, close it and the row is back to what it was.
+The interface gains exactly one thing: an item in the composer's tool row, standing next to the work-mode and model pickers. It reads `❝ Refs` (Chinese UI: `❝ 引用`). There is no sidebar, no toolbar and no floating widget — press it and the capture panel opens in the top-right corner of the window, close it and the row is back to what it was.
 
 ![The Refs button in the composer tool row](docs/images/composer-en.png)
 
@@ -127,16 +127,27 @@ Registry coverage for Chinese journals is thin: CNKI, Wanfang and CQVIP links ar
 
 ## The panel
 
+![The capture panel in list view](docs/images/panel-en.png)
+
 | Control | What it does |
 | --- | --- |
 | Scope | this turn, the last N turns, or the whole session |
 | Capture & save | captures, verifies, annotates and stores; the result lists what was saved and what went to the quarantine |
 | Row checkbox | which entries the next export includes; saved rows are ticked, ⚠ rows are not |
-| Expand a row | shows the stored fields; edits are saved per entry |
+| Badge | the state of the row at a glance: saved, ⚠ quarantined, skipped, failed |
+| Sub-line | first author · year · venue, plus the reason when the check failed |
+| Click a row | opens an independent edit page instead of expanding inside the list |
+| Three field groups | identifiers, bibliography, publication |
+| Entry type | a dropdown of the seven types; free text fails silently at export time |
+| Manual entry | a skipped row can be completed here and stored |
 | Format | BibTeX, RIS, or both |
 | Folder | export destination; empty means `refs/exports/` |
 | Export this capture | writes the ticked entries |
 | Export all references | writes the whole library |
+
+Opening a row gives you an independent edit page, with the fields grouped into identifiers, bibliography and publication:
+
+![The edit reference page](docs/images/panel-detail-en.png)
 
 ## Commands
 

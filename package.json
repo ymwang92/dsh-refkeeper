@@ -1,6 +1,6 @@
 {
   "name": "dsh-refkeeper",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Verify and export the references your AI conversation already cited: BibTeX/RIS with evidence-anchored annotations.",
   "author": "dsh-refkeeper contributors",
   "repository": {
@@ -50,7 +50,9 @@
     "docs/images/panel.png",
     "docs/images/panel-en.png",
     "docs/images/composer-en.png",
-    "docs/images/composer.png"
+    "docs/images/composer.png",
+    "docs/images/panel-detail.png",
+    "docs/images/panel-detail-en.png"
   ],
   "scripts": {
     "build": "tsdown && node scripts/build-client.mjs",
