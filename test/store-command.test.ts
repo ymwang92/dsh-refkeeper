@@ -1,11 +1,15 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { coerceReference, loadQuarantine, loadStore, saveReference, writeQuarantine } from '../src/store/io.ts'
+import { batchPath } from '../src/host/capture-batch.ts'
+import type { CaptureBatch } from '../src/core/batch.ts'
+import { coerceReference, loadQuarantine, loadStore, saveReference, storePaths } from '../src/store/io.ts'
+import { SCHEMA_VERSION } from '../src/store/types.ts'
+import type { StoredReference } from '../src/store/types.ts'
 import type { HostFsLike } from '../src/host/store-command.ts'
 import { isStoreSubcommand, parseStoreCommand, runStoreCommand, saveFromPayload, STORE_SUBCOMMANDS } from '../src/host/store-command.ts'
-import { writeBatch } from '../src/host/capture-batch.ts'
+import type { SourceRecord } from '../src/verify/types.ts'
 import { decodeDir } from '../src/core/panel.ts'
 
 const NOW = '2026-10-28T12:00:00.000Z'
@@ -34,8 +38,27 @@ beforeEach(async () => {
     NOW,
   )
   if (!reference) throw new Error('fixture did not coerce')
-  await saveReference(workspace, reference, { now: NOW })
+  await seedStore([reference])
 })
+
+async function seedStore(references: readonly StoredReference[]): Promise<void> {
+  const paths = storePaths(workspace)
+  await mkdir(paths.dir, { recursive: true })
+  const state = { schemaVersion: SCHEMA_VERSION, updatedAt: NOW, references }
+  await writeFile(paths.refs, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
+}
+
+async function seedQuarantine(entries: readonly StoredReference[]): Promise<void> {
+  const paths = storePaths(workspace)
+  await mkdir(paths.dir, { recursive: true })
+  const state = { schemaVersion: SCHEMA_VERSION, updatedAt: NOW, entries }
+  await writeFile(paths.quarantine, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
+}
+
+async function seedBatch(batch: CaptureBatch): Promise<void> {
+  await mkdir(storePaths(workspace).dir, { recursive: true })
+  await writeFile(batchPath(workspace), `${JSON.stringify(batch, null, 2)}\n`, 'utf8')
+}
 
 afterEach(async () => {
   await rm(workspace, { recursive: true, force: true })
@@ -87,7 +110,7 @@ describe('promote', () => {
       verification: { status: 'manual', checkedAt: NOW, note: 'panel confirmation' },
     }, NOW)
     if (!item) throw new Error('fixture did not coerce')
-    await saveReference(workspace, item, { now: NOW })
+    await seedStore([...(await loadStore(workspace)).state.references, item])
 
     const result = await saveFromPayload(
       { title: 'Meteorological Drought', authors: ['Palmer, W. C.'], year: 1965, type: 'journalArticle' },
@@ -117,7 +140,7 @@ describe('promote', () => {
       verification: { status: 'manual', checkedAt: NOW, note: 'panel confirmation' },
     }, NOW)
     if (!item) throw new Error('fixture did not coerce')
-    await saveReference(workspace, item, { now: NOW })
+    await seedStore([...(await loadStore(workspace)).state.references, item])
     const ids = Buffer.from(JSON.stringify([item.id]), 'utf8').toString('base64url')
     const result = await runStoreCommand(`promote --ids=${ids}`, { workspace, now: () => NOW })
     expect(result.text).toContain('already in the library')
@@ -131,7 +154,7 @@ describe('promote', () => {
       identifiers: { doi: '10.1000/promote-fixture' }, verification: { status: 'unverified' },
     }, NOW)
     if (!item) throw new Error('fixture did not coerce')
-    await writeQuarantine(workspace, { schemaVersion: 1, updatedAt: NOW, entries: [item] })
+    await seedQuarantine([item])
     const notVerified = await runStoreCommand('promote', {
       workspace, now: () => NOW, verify: async () => ({ status: 'warning' } as never),
     })
@@ -159,7 +182,7 @@ describe('promote', () => {
       NOW,
     )
     if (!first || !second) throw new Error('fixture did not coerce')
-    await writeQuarantine(workspace, { schemaVersion: 1, updatedAt: NOW, entries: [first, second] })
+    await seedQuarantine([first, second])
 
     const { encodeFlag } = await import('../src/ui/payload.ts')
     const run = await runStoreCommand(
@@ -203,7 +226,7 @@ describe('promote', () => {
     )
     if (!duplicate) throw new Error('fixture did not coerce')
     if (duplicate.id !== existing.id) throw new Error('fixture ids diverged')
-    await writeQuarantine(workspace, { schemaVersion: 1, updatedAt: NOW, entries: [duplicate] })
+    await seedQuarantine([duplicate])
 
     const run = await runStoreCommand('promote --manual --reason=confirmed-after-retry', {
       workspace, now: () => NOW,
@@ -401,7 +424,7 @@ describe('remove', () => {
       NOW,
     )
     if (!second) throw new Error('fixture did not coerce')
-    await saveReference(workspace, second, { now: NOW })
+    await seedStore([...(await loadStore(workspace, { now: NOW })).state.references, second])
 
     const result = await runStoreCommand('remove 10.1000/EXPORT-FIXTURE', { workspace, now: () => NOW })
     expect(result.kind).toBe('success')
@@ -442,7 +465,7 @@ describe('remove and edit keep both tables consistent', () => {
       NOW,
     )
     if (!duplicate) throw new Error('fixture did not coerce')
-    await writeQuarantine(workspace, { schemaVersion: 1, updatedAt: NOW, entries: [duplicate] })
+    await seedQuarantine([duplicate])
 
     const result = await runStoreCommand('remove --all --yes', { workspace, now: () => NOW })
 
@@ -464,7 +487,7 @@ describe('remove and edit keep both tables consistent', () => {
       NOW,
     )
     if (!duplicate) throw new Error('fixture did not coerce')
-    await writeQuarantine(workspace, { schemaVersion: 1, updatedAt: NOW, entries: [duplicate] })
+    await seedQuarantine([duplicate])
 
     const store = await loadStore(workspace, { now: NOW })
     const saved = store.state.references[0]
@@ -492,7 +515,7 @@ describe('remove and edit keep both tables consistent', () => {
       NOW,
     )
     if (!duplicate) throw new Error('fixture did not coerce')
-    await writeQuarantine(workspace, { schemaVersion: 1, updatedAt: NOW, entries: [duplicate] })
+    await seedQuarantine([duplicate])
 
     const { encodeFlag } = await import('../src/ui/payload.ts')
     const result = await runStoreCommand(
@@ -510,7 +533,7 @@ describe('export scope follows the last capture', () => {
     const store = await loadStore(workspace, { now: NOW })
     const captured = store.state.references[0]
     if (captured === undefined) throw new Error('fixture missing')
-    await writeBatch(workspace, {
+    await seedBatch({
       capturedAt: NOW,
       scope: 'whole conversation',
       entries: [{ title: captured.title, status: 'saved', id: captured.id }],
@@ -524,7 +547,7 @@ describe('export scope follows the last capture', () => {
   })
 
   it('treats --all as the whole library despite a recorded batch', async () => {
-    await writeBatch(workspace, {
+    await seedBatch({
       capturedAt: NOW,
       scope: 'whole conversation',
       entries: [{ title: 'gone', status: 'saved', id: 'ref_that_no_longer_exists' }],
@@ -537,7 +560,7 @@ describe('export scope follows the last capture', () => {
   })
 
   it('says the capture scope is empty instead of silently exporting the library', async () => {
-    await writeBatch(workspace, {
+    await seedBatch({
       capturedAt: NOW,
       scope: 'whole conversation',
       entries: [{ title: 'gone', status: 'saved', id: 'ref_that_no_longer_exists' }],
@@ -564,12 +587,12 @@ describe('export scope follows the last capture', () => {
       NOW,
     )
     if (!quarantined) throw new Error('fixture did not coerce')
-    await writeQuarantine(workspace, { schemaVersion: 1, updatedAt: NOW, entries: [quarantined] })
+    await seedQuarantine([quarantined])
 
     const store = await loadStore(workspace, { now: NOW })
     const saved = store.state.references[0]
     if (saved === undefined) throw new Error('fixture missing')
-    await writeBatch(workspace, {
+    await seedBatch({
       capturedAt: NOW,
       scope: 'whole conversation',
       entries: [
@@ -618,12 +641,12 @@ describe('export --ids narrows the export to the ticked entries', () => {
       NOW,
     )
     if (!quarantined) throw new Error('fixture did not coerce')
-    await writeQuarantine(workspace, { schemaVersion: 1, updatedAt: NOW, entries: [quarantined] })
+    await seedQuarantine([quarantined])
 
     const store = await loadStore(workspace, { now: NOW })
     const saved = store.state.references[0]
     if (saved === undefined) throw new Error('fixture missing')
-    await writeBatch(workspace, {
+    await seedBatch({
       capturedAt: NOW,
       scope: 'whole conversation',
       entries: [
@@ -702,11 +725,7 @@ describe('edit', () => {
       NOW,
     )
     if (!quarantined) throw new Error('fixture did not coerce')
-    await writeQuarantine(workspace, {
-      schemaVersion: 1,
-      updatedAt: NOW,
-      entries: [{ ...quarantined, verification: { status: 'quarantined' } }],
-    })
+    await seedQuarantine([{ ...quarantined, verification: { status: 'quarantined' } }])
 
     // Quarantine ids are titled after the raw candidate and carry spaces, so the
     // panel sends them base64url-encoded through the same flag as `--ids`.
@@ -800,6 +819,75 @@ describe('enrich', () => {
     expect(enriched?.authors.map((author) => author.family)).toEqual(['Example'])
   })
 
+  it('rebases resolver results over concurrent edits and additions', async () => {
+    let signalResolverStarted!: () => void
+    const resolverStarted = new Promise<void>((resolve) => {
+      signalResolverStarted = resolve
+    })
+    let releaseResolver!: (record: SourceRecord | undefined) => void
+    const resolverResult = new Promise<SourceRecord | undefined>((resolve) => {
+      releaseResolver = resolve
+    })
+
+    const enriching = runStoreCommand('enrich', {
+      workspace,
+      now: () => NOW,
+      resolveIdentifiers: async () => {
+        signalResolverStarted()
+        return await resolverResult
+      },
+    })
+
+    // The resolver is blocked without holding the store lock. These commits must
+    // complete before it returns, then survive the enrichment rebase.
+    await resolverStarted
+    const payload = Buffer.from(JSON.stringify({ volume: 'User volume' })).toString('base64url')
+    const edit = await runStoreCommand(`edit --id=doi:10.1000/export-fixture --payload=${payload}`, {
+      workspace,
+      now: () => NOW,
+    })
+    expect(edit.kind).toBe('success')
+
+    const added = coerceReference(
+      {
+        title: 'Added during enrichment',
+        type: 'journalArticle',
+        authors: [{ family: 'Concurrent', given: 'B.' }],
+        year: 2025,
+        identifiers: { doi: '10.1000/concurrent-addition' },
+      },
+      NOW,
+    )
+    if (!added) throw new Error('concurrent fixture did not coerce')
+    await saveReference(workspace, added, { now: NOW })
+
+    releaseResolver({
+      source: 'crossref',
+      id: '10.1000/export-fixture',
+      title: 'A registry title',
+      authors: ['Registry, Author'],
+      year: 2024,
+      container: 'Journal of Tests',
+      doi: '10.1000/export-fixture',
+      type: 'journal-article',
+      url: 'https://example.org/fixture',
+      volume: 'Registry volume',
+      issue: '3',
+      pages: '45-67',
+    })
+    const result = await enriching
+
+    expect(result.kind).toBe('success')
+    const stored = (await loadStore(workspace, { now: NOW })).state.references
+    const original = stored.find((reference) => reference.identifiers.doi === '10.1000/export-fixture')
+    expect(original?.volume).toBe('User volume')
+    expect(original?.issue).toBe('3')
+    expect(original?.pages).toBe('45-67')
+    expect(stored.find((reference) => reference.identifiers.doi === '10.1000/concurrent-addition')?.title).toBe(
+      'Added during enrichment',
+    )
+  })
+
   it('leaves the library alone when the host injected no resolver', async () => {
     const result = await runStoreCommand('enrich', { workspace, now: () => NOW })
     expect(result.kind).toBe('error')
@@ -814,8 +902,7 @@ describe('enrich: Markdown decoration left by an earlier capture', () => {
   it('cleans a row even when no registry record is needed', async () => {
     const stored = (await loadStore(workspace, { now: NOW })).state.references[0]
     if (stored === undefined) throw new Error('fixture missing')
-    await saveReference(
-      workspace,
+    await seedStore([
       {
         ...stored,
         title: '*Physiographically sensitive mapping*',
@@ -823,8 +910,7 @@ describe('enrich: Markdown decoration left by an earlier capture', () => {
         authors: [{ family: '> Daly', given: 'C.', sequence: 0 }],
         identifiers: {},
       },
-      { now: NOW },
-    )
+    ])
 
     let resolverCalls = 0
     const result = await runStoreCommand('enrich', {

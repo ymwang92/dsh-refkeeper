@@ -204,3 +204,25 @@ accepted = status==='verified' || status==='manual' → false
 **P7（提示，B2 历史问题；B3 静态修复已实现，M2 GUI 待复验）—— 字体权重曾不统一。**
 **B2 根因（历史）**：空态卡为 600、批次标题 `<strong>` 默认 700，其余继承；目标稿为 500。
 **B3 静态处理**：空态及辅助标题统一使用 500；最终宿主字体呈现待 M2 GUI 复验。
+
+## 2026-11-08 · Panel fixed-position portal
+
+### 根因与实测
+
+面板保持 `position: fixed; right: 24px; top: 84px; width: 420px`。在 748×425 视口中，预期矩形左上角为 `(304,84)`。用户对宿主 composer 祖先逐层注入 `transform: translateZ(0)` 后，L0/L1 探针移动到 `(272,298)`，L2 到 `(281,290)`，L3 到 `(297,290)`，L5/L8 到 `(297,198)`；L4/L6/L7 不变。L5/L8 的探针底边 y=298，和桌面截图中面板贴近视口底部的几何现象吻合。相同注入下，挂到 `document.body` 的 portal 探针始终保持 `(304,84)`。
+
+CSS transforms（以及 filter、perspective、contain、will-change 等祖先属性）可为 fixed 后代建立新的包含块，使其相对祖先而非视口定位；composer 容器链因此解释了桌面偏移。该证据来自用户提供的 Web 注入实验，**不是本轮 Electron GUI 实测**。
+
+### 修复
+
+`src/client.tsx` 通过 `ReactDOM.createPortal(existingPanel, document.body)` 渲染现有 `CapturePanel` section。保留 `PANEL_STYLE`、420px 宽度、slot 注册及全部 UI 交互；未改 Host/API、storage、命令协议或 DSH 权限。主题变量在宿主 `body` 上仍可继承；缺失变量继续使用现有 fallback。
+
+### 验证
+
+- `npm run typecheck`：通过，0 个诊断。
+- `npx vitest run --maxWorkers=1`：27 个测试文件、365 项测试全部通过（本次复验 3.67s）。
+- `npm run build` 与 `node --check lib/client.js`：通过；生成 `lib/client.js`。
+- `grep -c "jsx-runtime" lib/client.js` = 0；`grep -c "choose" lib/client.js` = 0。
+- `git diff --check`：文档修改后复跑通过，exit 0。
+- Client Slot 查询确认 `conversation.composer.dock` 可用，`dsh-refkeeper/refkeeper-panel` 为 active。
+- 连接地址 `http://127.0.0.1:54409/` 的未认证 HTTP 请求返回 401；未启动额外浏览器、未更改 HOME。实际 Web DOM、交互及位置未测；Electron 桌面 GUI 位置由用户验收。

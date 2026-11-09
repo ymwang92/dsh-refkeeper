@@ -1,5 +1,9 @@
 import * as React from 'react'
 
+const ReactDOM = require('react-dom') as {
+  createPortal: (children: React.ReactNode, container: Element) => React.ReactPortal
+}
+
 /**
  * Client face of dsh-refkeeper (M4).
  *
@@ -1098,9 +1102,10 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
       label,
     )
 
-  return React.createElement(
-    'section',
-    { style: PANEL_STYLE, 'aria-label': 'dsh-refkeeper panel' },
+  return ReactDOM.createPortal(
+    React.createElement(
+      'section',
+      { style: PANEL_STYLE, 'aria-label': 'dsh-refkeeper panel' },
     React.createElement(
       'div',
       { style: { ...ROW_STYLE, justifyContent: 'space-between' } },
@@ -1222,10 +1227,11 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
         text.exportAll,
       ),
     ),
-    notice === ''
-      ? null
-      : React.createElement('div', { style: { marginTop: '6px', color: UI_TOKENS.color.warning } }, notice),
-
+      notice === ''
+        ? null
+        : React.createElement('div', { style: { marginTop: '6px', color: UI_TOKENS.color.warning } }, notice),
+    ),
+    document.body,
   )
 }
 

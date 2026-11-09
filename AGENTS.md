@@ -168,10 +168,28 @@ node dev/gui-eval.mjs 9333 "$(cat /tmp/expr.js)"   # 读 DOM（表达式放文�
 | V9 | 命令字面量 | `/refs capture --scope=all`（client.tsx:883-885）、`/refs save --payload=<base64url>`（:862）、`/refs export …`（:898）—— **一字未改**（静态验证） | ✅ |
 | V10 | 多作者解析 | `Steffen, Will et al.`（19 位）、`Devlin, J. et al.`（4 位）、`Vaswani, A. et al.`（3 位）—— 均正确折叠为「第一作者 et al.」 | ✅ |
 | V12 | 面板内「选择文件夹」字样 | 无 | ✅ |
-| V11 | 手动入表走 `/refs save` | **未测** —— 本轮批次里没有 skipped 条目（隔离条目是 quarantined），「手动入表」入口未触发 | ⚠️ |
+| V11 | 手动入表走 `/refs save` | skipped 条目（`title` 空 + 查不到的 DOI）→ 面板出「手动入表」→ 独立创建视图（14 字段三组）→ 填表后「保存并入表」未禁用 → 宿主回 `already in the library doi:10.48550/arxiv.1706.03762;` → 面板显示「该文献已在文献库中。」 | ✅ |
 
-**V11 仍未测。** 要造出 skipped 条目需要一条**有作者与年份但没有标题**、且标题不会被抽取器
-从 DOI 前缀误取的引用（例如 `doi:10` 被当成了标题，见 quarantined 那条）。
+**★ 制造 skipped 条目的正确写法（供以后复现）★**
+`extractCandidates` 对带 `doi:` / `arXiv:` 前缀的文本会把前缀当标题
+（`doi:10` / `arXiv:2601` / `https://doi`），那样的条目会走 **quarantined** 而不是 skipped。
+**要 skipped 必须让标题真的为空**：去掉前缀即可 ——
+
+```
+Foo, B., and Bar, C. (2020). 10.9999/this-doi-does-not-exist-xyz123
+  → title="" | doi="10.9999/this-doi-does-not-exist-xyz123" | year=undefined | authors=[]
+```
+
+核验查不到这个 DOI → 标题仍空 → `capture-save.ts:119` 判 `skipped` ✓
+（另注：裸 DOI 会被当成「存在性检查」，核验会用 registry 记录补全字段 —— 所以
+`doi:10.1126/science.1259855` 那样只写标识符也能入表，不会 skipped。）
+
+### 面板定位偏差（Portal 修复已实现；桌面 GUI 验收待用户）
+
+根因：祖先链上的 `transform` 等属性会改变 `position: fixed` 的包含块。用户在 748×425 的注入实测中，L5/L8 使探针由 `(304,84)` 偏到 `(297,198)`；portal 到 `body` 后保持 `(304,84)`。
+修复：`CapturePanel` 将原面板 section 渲染到 `document.body`；宿主 slot、420px 样式与交互未改。
+状态：静态门禁通过，Client Slot 仍 active；实际 Web DOM/交互未测，Electron 桌面位置待用户验收。完整测量与验证记录见 [`docs/verification-log.md`](docs/verification-log.md)。
+
 
 ### 截图现状
 
