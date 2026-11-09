@@ -74,7 +74,28 @@ grep -c "choose"     lib/client.js                 # → 0
 
 外加实施稿 §6.2 的 GUI 实证（V1–V12），截图留档。
 
-## 当前阶段：B3 已过 → 修 P1–P4 → M2 终验
+## 当前阶段：**0.1.3 已发布（2026-11-08）**
+
+| 产物 | 状态 |
+|---|---|
+| GitHub main | `9ba159d` 已推送 ✓ |
+| GitHub Release | `v0.1.3`（tag 指向 `9ba159d`），附件 `dsh-refkeeper-0.1.3.tgz` ✓ |
+| npm | `dsh-refkeeper@0.1.3`，`latest` tag ✓，已从 registry 装进 desktop profile 验证 ✓ |
+| README | 中英双份，npm 页面渲染 tarball 里的 `README.md`（无需手动同步）✓ |
+
+**发布要点（下次复用）**：
+- `.tgz` = `npm pack` 的产物，用 `gh release create v0.1.3 --notes-file docs/release-notes-0.1.3.md dsh-refkeeper-0.1.3.tgz` 传上去；
+  **`.zip` 不用管** —— GitHub 每个 release 自动提供 "Source code (zip)"。
+- **`package.json` 的 `files` 是显式列表** —— 新增图片必须同时加进 `files` 和 `screenshots.json`，
+  否则 npm 包里的 README 会 404，宿主市场也展示不出来。
+- **`npm publish` 需要 2FA 的一次性密码**（`--otp=<code>`）。本机账号的 `tfa.mode` 是
+  `auth-and-writes`，验证码来自用户的验证器 App；让用户在自己终端跑，别把码带进对话。
+- `npm pack` **不是确定性的** —— 同样的内容两次打包 shasum 不同（文件大小逐个一致即可）。
+- 发布顺序：**先 commit → 再 pack → 再 push → 最后 release**（未跟踪的新文件不进 tarball）。
+- 剩下的可选项：注册表条目在另一个仓库（`awesome-dsh-plugin/awesome-dsh-plugin` 的
+  `data/plugins/ymwang92__dsh-refkeeper.yml`），文档说「a resubmission later is fine」。
+
+## 历史阶段：B3 已过 → 修 P1–P4 → M2 终验（均已完成）
 
 | 批次 | 内容 | 授权边界 |
 |---|---|---|
