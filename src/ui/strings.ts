@@ -72,6 +72,8 @@ export interface Strings {
   readonly fieldLanguage: string
   readonly fieldDoi: string
   readonly fieldArxiv: string
+  readonly fieldPmid: string
+  readonly fieldPmcid: string
   readonly fieldUrl: string
 }
 
@@ -147,6 +149,8 @@ export const EN: Strings = {
   fieldLanguage: 'Language',
   fieldDoi: 'DOI',
   fieldArxiv: 'arXiv ID',
+  fieldPmid: 'PMID',
+  fieldPmcid: 'PMCID',
   fieldUrl: 'URL',
 }
 
@@ -222,6 +226,8 @@ export const ZH: Strings = {
   fieldLanguage: '语言',
   fieldDoi: 'DOI',
   fieldArxiv: 'arXiv ID',
+  fieldPmid: 'PMID',
+  fieldPmcid: 'PMCID',
   fieldUrl: 'URL',
 }
 

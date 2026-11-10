@@ -106,13 +106,20 @@ function identifiers(raw: Record<string, unknown>): Record<string, string> {
     ['doi', 'doi'],
     ['arxiv', 'arxiv'],
     ['arxivId', 'arxiv'],
+    ['pmid', 'pmid'],
+    ['pmcid', 'pmcid'],
     ['isbn', 'isbn'],
     ['reportNumber', 'reportNumber'],
   ]
   for (const [from, to] of sources) {
     if (out[to] !== undefined) continue
     const text = str(nested[from]) ?? str(raw[from])
-    if (text) out[to] = text
+    if (text === undefined) continue
+    const normalized =
+      to === 'pmid' ? text.replace(/\s+/gu, '')
+      : to === 'pmcid' ? text.replace(/\s+/gu, '').toUpperCase()
+      : text
+    if (normalized) out[to] = normalized
   }
   return out
 }

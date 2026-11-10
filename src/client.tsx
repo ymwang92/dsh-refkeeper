@@ -288,7 +288,7 @@ function entryMeta(entry: BatchEntry, text: Strings): string {
 }
 
 interface FieldRow {
-  readonly key: 'type' | 'title' | 'authors' | 'containerTitle' | 'year' | 'volume' | 'issue' | 'pages' | 'publisher' | 'publisherPlace' | 'language' | 'doi' | 'arxivId' | 'url'
+  readonly key: 'type' | 'title' | 'authors' | 'containerTitle' | 'year' | 'volume' | 'issue' | 'pages' | 'publisher' | 'publisherPlace' | 'language' | 'doi' | 'arxivId' | 'pmid' | 'pmcid' | 'url'
   readonly label: (text: Strings) => string
   readonly multiline?: boolean
   readonly numeric?: boolean
@@ -311,6 +311,8 @@ const FIELDS: readonly FieldRow[] = [
   { key: 'language', label: (text) => text.fieldLanguage },
   { key: 'doi', label: (text) => text.fieldDoi },
   { key: 'arxivId', label: (text) => text.fieldArxiv },
+  { key: 'pmid', label: (text) => text.fieldPmid },
+  { key: 'pmcid', label: (text) => text.fieldPmcid },
   { key: 'url', label: (text) => text.fieldUrl },
 ]
 
@@ -331,6 +333,8 @@ function draftOf(entry: BatchEntry): Record<string, string> {
     language: fields?.language ?? '',
     doi: fields?.doi ?? entry.doi ?? '',
     arxivId: fields?.arxivId ?? entry.arxivId ?? '',
+    pmid: fields?.pmid ?? entry.pmid ?? '',
+    pmcid: fields?.pmcid ?? entry.pmcid ?? '',
     url: fields?.url ?? '',
   }
   return base
@@ -473,6 +477,8 @@ function entryWithManualResult(entry: BatchEntry, payload: Record<string, unknow
     ...(typeof payload['year'] === 'number' ? { year: payload['year'] } : {}),
     ...(typeof payload['doi'] === 'string' && payload['doi'] !== '' ? { doi: payload['doi'] } : {}),
     ...(typeof payload['arxivId'] === 'string' && payload['arxivId'] !== '' ? { arxivId: payload['arxivId'] } : {}),
+    ...(typeof payload['pmid'] === 'string' && payload['pmid'] !== '' ? { pmid: payload['pmid'] } : {}),
+    ...(typeof payload['pmcid'] === 'string' && payload['pmcid'] !== '' ? { pmcid: payload['pmcid'] } : {}),
   }
 }
 

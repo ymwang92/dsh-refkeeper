@@ -32,6 +32,8 @@ export interface BatchFields {
   readonly language?: string | undefined
   readonly doi?: string | undefined
   readonly arxivId?: string | undefined
+  readonly pmid?: string | undefined
+  readonly pmcid?: string | undefined
   readonly url?: string | undefined
 }
 
@@ -42,6 +44,8 @@ export interface BatchEntry {
   readonly year?: number | undefined
   readonly doi?: string | undefined
   readonly arxivId?: string | undefined
+  readonly pmid?: string | undefined
+  readonly pmcid?: string | undefined
   /** Present when verification failed, so the panel can say why. */
   readonly reason?: string | undefined
   /** Snapshot of the stored record's editable metadata. */
@@ -93,6 +97,8 @@ function sanitizeFields(value: unknown): BatchFields | undefined {
     ...(text(raw['language']) === undefined ? {} : { language: text(raw['language']) }),
     ...(plain(raw['doi']) === undefined ? {} : { doi: plain(raw['doi']) }),
     ...(plain(raw['arxivId']) === undefined ? {} : { arxivId: plain(raw['arxivId']) }),
+    ...(plain(raw['pmid']) === undefined ? {} : { pmid: plain(raw['pmid']) }),
+    ...(plain(raw['pmcid']) === undefined ? {} : { pmcid: plain(raw['pmcid']) }),
     ...(plain(raw['url']) === undefined ? {} : { url: plain(raw['url']) }),
   }
 }
@@ -115,6 +121,8 @@ function sanitizeEntry(entry: unknown): BatchEntry | undefined {
   const id = typeof raw['id'] === 'string' && raw['id'] !== '' ? raw['id'] : undefined
   const doi = typeof raw['doi'] === 'string' && raw['doi'] !== '' ? raw['doi'] : undefined
   const arxivId = typeof raw['arxivId'] === 'string' && raw['arxivId'] !== '' ? raw['arxivId'] : undefined
+  const pmid = typeof raw['pmid'] === 'string' && raw['pmid'] !== '' ? raw['pmid'] : undefined
+  const pmcid = typeof raw['pmcid'] === 'string' && raw['pmcid'] !== '' ? raw['pmcid'] : undefined
   const reason = text(raw['reason'])
   const title = text(raw['title']) ?? ''
   const year = typeof raw['year'] === 'number' ? raw['year'] : undefined
@@ -128,6 +136,8 @@ function sanitizeEntry(entry: unknown): BatchEntry | undefined {
     ...(id === undefined ? {} : { id }),
     ...(doi === undefined ? {} : { doi }),
     ...(arxivId === undefined ? {} : { arxivId }),
+    ...(pmid === undefined ? {} : { pmid }),
+    ...(pmcid === undefined ? {} : { pmcid }),
     ...(reason === undefined ? {} : { reason }),
     ...(year === undefined ? {} : { year }),
   }

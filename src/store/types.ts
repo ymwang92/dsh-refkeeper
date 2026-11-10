@@ -41,6 +41,8 @@ export interface RefAuthor {
 export interface RefIdentifiers {
   readonly doi?: string
   readonly arxiv?: string
+  readonly pmid?: string
+  readonly pmcid?: string
   readonly isbn?: string
   readonly reportNumber?: string
 }

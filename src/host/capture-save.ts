@@ -69,6 +69,8 @@ export function fieldsOfReference(ref: StoredReference | undefined): BatchFields
     ...(ref.language === undefined ? {} : { language: ref.language }),
     ...(ref.identifiers.doi === undefined ? {} : { doi: ref.identifiers.doi }),
     ...(ref.identifiers.arxiv === undefined ? {} : { arxivId: ref.identifiers.arxiv }),
+    ...(ref.identifiers.pmid === undefined ? {} : { pmid: ref.identifiers.pmid }),
+    ...(ref.identifiers.pmcid === undefined ? {} : { pmcid: ref.identifiers.pmcid }),
     ...(ref.url === undefined ? {} : { url: ref.url }),
   }
 }
@@ -97,7 +99,12 @@ export async function saveCaptured(
     // ones: a citation in the conversation usually carries a title and a DOI and
     // nothing else, and verification already looked the record up. Discarding it
     // left the panel's detail form empty, which read as "the capture is broken".
-    if (candidate.doi !== '' || candidate.arxivId !== '') {
+    if (
+      candidate.doi !== '' ||
+      candidate.arxivId !== '' ||
+      (candidate.pmid !== undefined && candidate.pmid !== '') ||
+      (candidate.pmcid !== undefined && candidate.pmcid !== '')
+    ) {
       try {
         const record = await deps.resolveIdentifier(candidate)
         if (record !== undefined) {
@@ -114,6 +121,8 @@ export async function saveCaptured(
       ...(candidate.year === undefined ? {} : { year: candidate.year }),
       ...(candidate.doi === '' ? {} : { doi: candidate.doi }),
       ...(candidate.arxivId === '' ? {} : { arxivId: candidate.arxivId }),
+      ...(candidate.pmid === undefined || candidate.pmid === '' ? {} : { pmid: candidate.pmid }),
+      ...(candidate.pmcid === undefined || candidate.pmcid === '' ? {} : { pmcid: candidate.pmcid }),
     }
 
     if (candidate.title.trim() === '') {
@@ -129,6 +138,8 @@ export async function saveCaptured(
       type: candidate.type,
       doi: candidate.doi,
       arxivId: candidate.arxivId,
+      pmid: candidate.pmid,
+      pmcid: candidate.pmcid,
       isbn: candidate.isbn,
       reportNumber: candidate.reportNumber,
       url: candidate.url,

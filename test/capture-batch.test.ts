@@ -119,7 +119,11 @@ describe('editable field snapshots', () => {
             issue: '2',
             pages: '10-19',
             doi: '10.1000/x',
+            pmid: '12345678',
+            pmcid: 'PMC1234567',
           },
+          pmid: '12345678',
+          pmcid: 'PMC1234567',
         },
       ],
     })
@@ -133,7 +137,10 @@ describe('editable field snapshots', () => {
       issue: '2',
       pages: '10-19',
       doi: '10.1000/x',
+      pmid: '12345678',
+      pmcid: 'PMC1234567',
     })
+    expect(batch?.entries[0]).toMatchObject({ pmid: '12345678', pmcid: 'PMC1234567' })
   })
 
   it('survives a batch without fields and drops unusable ones', () => {

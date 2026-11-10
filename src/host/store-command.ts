@@ -390,7 +390,7 @@ export interface StoreCommandDeps {
    * before the bibliographic fields were parsed (or captured from a bare DOI).
    */
   readonly resolveIdentifiers?:
-    | ((doi: string, arxivId: string) => Promise<SourceRecord | undefined>)
+    | ((doi: string, arxivId: string, pmid: string, pmcid: string) => Promise<SourceRecord | undefined>)
     | undefined
 }
 
@@ -1271,20 +1271,33 @@ function applyPatch(
   }
   const identifiers = { ...current.identifiers }
   let identifiersChanged = false
+  let doiOrArxivChanged = false
   if (typeof patch['doi'] === 'string') {
     const doi = patch['doi'].trim()
     identifiers.doi = doi === '' ? undefined : doi
     identifiersChanged = true
+    doiOrArxivChanged = true
   }
   if (typeof patch['arxivId'] === 'string') {
     const arxiv = patch['arxivId'].trim()
     identifiers.arxiv = arxiv === '' ? undefined : arxiv
     identifiersChanged = true
+    doiOrArxivChanged = true
   }
-  if (identifiersChanged) {
-    next.identifiers = identifiers
-    changed.push('doi/arxiv')
+  if (typeof patch['pmid'] === 'string') {
+    const pmid = patch['pmid'].replace(/\s+/gu, '')
+    identifiers.pmid = pmid === '' ? undefined : pmid
+    identifiersChanged = true
+    changed.push('pmid')
   }
+  if (typeof patch['pmcid'] === 'string') {
+    const pmcid = patch['pmcid'].replace(/\s+/gu, '').toUpperCase()
+    identifiers.pmcid = pmcid === '' ? undefined : pmcid
+    identifiersChanged = true
+    changed.push('pmcid')
+  }
+  if (identifiersChanged) next.identifiers = identifiers
+  if (doiOrArxivChanged) changed.push('doi/arxiv')
   next.updatedAt = now
   return { next: { ...next }, changed }
 }
@@ -1436,7 +1449,7 @@ export async function enrichReferences(
     if (doi === '' && arxiv === '') return undefined
     let record: SourceRecord | undefined
     try {
-      record = await resolve(doi, arxiv)
+      record = await resolve(doi, arxiv, '', '')
     } catch {
       record = undefined
     }

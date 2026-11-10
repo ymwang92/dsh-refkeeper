@@ -696,12 +696,14 @@ describe('edit', () => {
         pages: '1-9',
         authors: ['Example, A.', 'Second, B.'],
         year: 2025,
+        pmid: '12 345 678',
+        pmcid: ' pmc7840891 ',
       })}`,
       { workspace, now: () => '2026-10-29T00:00:00.000Z' },
     )
     expect(result.kind).toBe('success')
     expect(result.text).toContain('edited doi:10.1000/export-fixture → refs/refs.json')
-    expect(result.text).toContain('fields: title, year, volume, pages, authors')
+    expect(result.text).toContain('fields: title, year, volume, pages, authors, pmid, pmcid')
 
     const store = (await loadStore(workspace, { now: NOW })).state
     const edited = store.references[0]
@@ -711,6 +713,8 @@ describe('edit', () => {
     expect(edited?.year).toBe(2025)
     expect(edited?.authors.map((author) => author.family)).toEqual(['Example', 'Second'])
     expect(edited?.verification.status).toBe('manual')
+    expect(edited?.id).toBe('doi:10.1000/export-fixture')
+    expect(edited?.identifiers).toMatchObject({ pmid: '12345678', pmcid: 'PMC7840891' })
     expect(edited?.updatedAt).toBe('2026-10-29T00:00:00.000Z')
   })
 

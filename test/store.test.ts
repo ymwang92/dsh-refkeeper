@@ -347,6 +347,34 @@ describe('reference identity', () => {
     )
     expect(ref?.identifiers).toEqual({ doi: '10.1000/nested' })
   })
+
+  it('normalizes flat and nested PMID/PMCID without changing identity', () => {
+    const flat = coerceReference(
+      { title: 'Flat article', year: 2015, pmid: '12 345 678', pmcid: ' pmc1234567 ' },
+      now,
+    )
+    const nested = coerceReference(
+      {
+        title: 'Nested article',
+        year: 2015,
+        identifiers: { pmid: '12 345 678', pmcid: 'pmc 1234567' },
+        pmid: '87654321',
+        pmcid: 'PMC7654321',
+      },
+      now,
+    )
+    expect(flat?.identifiers).toEqual({ pmid: '12345678', pmcid: 'PMC1234567' })
+    expect(nested?.identifiers).toEqual({ pmid: '12345678', pmcid: 'PMC1234567' })
+
+    const withIds = coerceReference(
+      { title: 'Same article', year: 2015, pmid: '12345678', pmcid: 'PMC1234567' },
+      now,
+    )
+    const withoutIds = coerceReference({ title: 'Same article', year: 2015 }, now)
+    expect(withIds?.id).toBe(withoutIds?.id)
+    expect(withIds?.id).not.toContain('pmid:')
+    expect(withIds?.id).not.toContain('pmcid:')
+  })
 })
 
 describe('annotated.md', () => {

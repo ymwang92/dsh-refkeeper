@@ -68,6 +68,42 @@ describe('saveCaptured identifier hydration', () => {
     expect(summary.entries?.[0]).toMatchObject({ status: 'saved', title: 'A verified example paper', year: 2024 })
   })
 
+  it('resolves and preserves a PMID/PMCID-only candidate', async () => {
+    const candidate: Candidate = {
+      ...identifierOnly,
+      key: 'title:verified example paper|2024',
+      doi: '',
+      pmid: '12345678',
+      pmcid: 'PMC1234567',
+    }
+    let resolverCalls = 0
+    let savedPayload: Record<string, unknown> | undefined
+    const summary = await saveCaptured([candidate], {
+      now: () => '2026-10-28T12:00:00.000Z',
+      resolveIdentifier: async (seen) => {
+        resolverCalls += 1
+        expect(seen.pmid).toBe('12345678')
+        expect(seen.pmcid).toBe('PMC1234567')
+        return registryRecord
+      },
+      save: async (payload) => {
+        savedPayload = payload as Record<string, unknown>
+        return { kind: 'success' }
+      },
+    })
+
+    expect(resolverCalls).toBe(1)
+    expect(savedPayload).toMatchObject({ pmid: '12345678', pmcid: 'PMC1234567' })
+    expect(summary.entries?.[0]).toMatchObject({
+      status: 'saved',
+      pmid: '12345678',
+      pmcid: 'PMC1234567',
+    })
+    // The save stub returns no editable field snapshot; the batch-level IDs
+    // still let the panel populate the draft until a saved record is reread.
+    expect(summary.entries?.[0]).not.toHaveProperty('fields')
+  })
+
   it('hydrates a bare arXiv id from its registry before the normal save path', async () => {
     const candidate: Candidate = {
       ...identifierOnly,
