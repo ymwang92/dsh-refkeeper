@@ -40,6 +40,8 @@ export interface Candidate {
   readonly origins: readonly CandidateOrigin[]
   readonly doi: string
   readonly arxivId: string
+  readonly pmid?: string | undefined
+  readonly pmcid?: string | undefined
   readonly isbn: string
   readonly reportNumber: string
   readonly url: string
@@ -69,12 +71,14 @@ function firstNonNull<T>(...values: readonly (T | undefined)[]): T | undefined {
 }
 
 /**
- * Identity of a work: DOI, then arXiv id, then ISBN, then report number, then
+ * Identity of a work: DOI, arXiv, PMID, PMCID, ISBN, report number, then
  * normalized title+year, then the URL. Mirrors §5.2 of the plan.
  */
-export function dedupeKey(candidate: Pick<Candidate, 'doi' | 'arxivId' | 'isbn' | 'reportNumber' | 'title' | 'year' | 'url' | 'key'>): string {
+export function dedupeKey(candidate: Pick<Candidate, 'doi' | 'arxivId' | 'pmid' | 'pmcid' | 'isbn' | 'reportNumber' | 'title' | 'year' | 'url' | 'key'>): string {
   if (candidate.doi !== '') return `doi:${candidate.doi}`
   if (candidate.arxivId !== '') return `arxiv:${candidate.arxivId}`
+  if (candidate.pmid !== undefined && candidate.pmid !== '') return `pmid:${candidate.pmid}`
+  if (candidate.pmcid !== undefined && candidate.pmcid !== '') return `pmcid:${candidate.pmcid}`
   if (candidate.isbn !== '') return `isbn:${candidate.isbn}`
   if (candidate.reportNumber !== '') return `report:${candidate.reportNumber}`
   // A blank title must not become `title:|2024`: that key collides with every
@@ -86,10 +90,12 @@ export function dedupeKey(candidate: Pick<Candidate, 'doi' | 'arxivId' | 'isbn' 
 }
 
 /** True when a candidate can at least be named: an identifier, a title or a URL. */
-export function hasIdentity(candidate: Pick<Candidate, 'doi' | 'arxivId' | 'isbn' | 'reportNumber' | 'title' | 'url'>): boolean {
+export function hasIdentity(candidate: Pick<Candidate, 'doi' | 'arxivId' | 'pmid' | 'pmcid' | 'isbn' | 'reportNumber' | 'title' | 'url'>): boolean {
   return (
     candidate.doi !== '' ||
     candidate.arxivId !== '' ||
+    candidate.pmid !== undefined && candidate.pmid !== '' ||
+    candidate.pmcid !== undefined && candidate.pmcid !== '' ||
     candidate.isbn !== '' ||
     candidate.reportNumber !== '' ||
     titleKey(candidate.title) !== '' ||
@@ -138,6 +144,8 @@ export function candidateFromIdentifier(hit: IdentifierHit, seq: number): Candid
     ...base,
     doi: hit.kind === 'doi' ? hit.value : '',
     arxivId: hit.kind === 'arxiv' ? hit.value : '',
+    ...(hit.kind === 'pmid' ? { pmid: hit.value } : {}),
+    ...(hit.kind === 'pmcid' ? { pmcid: hit.value.toUpperCase() } : {}),
     isbn: hit.kind === 'isbn' ? hit.value : '',
     reportNumber: hit.kind === 'report' ? hit.value : '',
     url: hit.kind === 'url' ? hit.value : '',
@@ -165,20 +173,19 @@ function typeForIdentifier(kind: IdentifierHit['kind']): ItemType {
 
 /** Citation-string candidate: has prose fields, usually lacks an identifier. */
 export function candidateFromCitation(hit: CitationHit, seq: number, identifiers: readonly IdentifierHit[]): Candidate {
-  const attached = identifiers.find(
-    (identifier) =>
-      identifier.kind === 'doi' ||
-      identifier.kind === 'arxiv' ||
-      identifier.kind === 'isbn' ||
-      identifier.kind === 'report',
-  )
+  const attached = (kind: IdentifierHit['kind']): string =>
+    identifiers.find((identifier) => identifier.kind === kind)?.value ?? ''
+  const pmid = attached('pmid')
+  const pmcid = attached('pmcid').toUpperCase()
   const base = emptyCandidate(hit.type, 'citation', hit.confidence)
   const filled: Candidate = {
     ...base,
-    doi: hit.doi !== '' ? hit.doi : attached?.kind === 'doi' ? attached.value : '',
-    arxivId: attached?.kind === 'arxiv' ? attached.value : '',
-    isbn: attached?.kind === 'isbn' ? attached.value : '',
-    reportNumber: attached?.kind === 'report' ? attached.value : '',
+    doi: hit.doi !== '' ? hit.doi : attached('doi'),
+    arxivId: attached('arxiv'),
+    ...(pmid === '' ? {} : { pmid }),
+    ...(pmcid === '' ? {} : { pmcid }),
+    isbn: attached('isbn'),
+    reportNumber: attached('report'),
     title: hit.title,
     authors: hit.authors,
     year: hit.year,
@@ -204,6 +211,8 @@ export interface ModelCandidateInput {
   readonly type?: ItemType | undefined
   readonly doi?: string | undefined
   readonly arxivId?: string | undefined
+  readonly pmid?: string | undefined
+  readonly pmcid?: string | undefined
   readonly isbn?: string | undefined
   readonly reportNumber?: string | undefined
   readonly url?: string | undefined
@@ -225,10 +234,14 @@ export interface ModelCandidateInput {
 export function candidateFromModel(input: ModelCandidateInput): Candidate {
   const base = emptyCandidate(input.type ?? 'journalArticle', 'model', 0.9)
   const authors = (input.authors ?? []).map((author) => collapseSpace(author)).filter((author) => author !== '')
+  const pmid = (input.pmid ?? '').trim()
+  const pmcid = (input.pmcid ?? '').trim().toUpperCase()
   const filled: Candidate = {
     ...base,
     doi: normalizeDoi(input.doi ?? ''),
     arxivId: normalizeArxiv(input.arxivId ?? ''),
+    ...( /^\d{6,8}$/u.test(pmid) ? { pmid } : {}),
+    ...( /^PMC\d+$/u.test(pmcid) ? { pmcid } : {}),
     isbn: normalizeIsbn(input.isbn ?? ''),
     reportNumber: collapseSpace(input.reportNumber ?? ''),
     url: (input.url ?? '').trim(),
@@ -262,6 +275,10 @@ export function mergeCandidates(current: Candidate, incoming: Candidate): Candid
 
   const pick = (mine: string, theirs: string): string =>
     mine === '' || (incomingWins && theirs !== '') ? nonEmpty(theirs, mine) : mine
+  const pickOptional = (mine: string | undefined, theirs: string | undefined): string | undefined => {
+    if (mine === undefined || mine === '') return theirs
+    return incomingWins && theirs !== undefined && theirs !== '' ? theirs : mine
+  }
 
   const merged: Candidate = {
     key: current.key,
@@ -269,6 +286,8 @@ export function mergeCandidates(current: Candidate, incoming: Candidate): Candid
     origins: [...new Set([...current.origins, ...incoming.origins])],
     doi: pick(current.doi, incoming.doi),
     arxivId: pick(current.arxivId, incoming.arxivId),
+    pmid: pickOptional(current.pmid, incoming.pmid),
+    pmcid: pickOptional(current.pmcid, incoming.pmcid),
     isbn: pick(current.isbn, incoming.isbn),
     reportNumber: pick(current.reportNumber, incoming.reportNumber),
     url: pick(current.url, incoming.url),
@@ -293,6 +312,7 @@ export function mergeCandidates(current: Candidate, incoming: Candidate): Candid
   }
   return {
     ...merged,
+    key: dedupeKey(merged),
     needsModelEnrichment: merged.title === '' || merged.year === undefined || merged.authors.length === 0,
   }
 }
@@ -337,19 +357,42 @@ export function extractCandidates(
     if (candidate.title === '') return undefined
     return `${titleKey(candidate.title)}|${String(candidate.year ?? '')}`
   }
+  const rebuildByTitle = (): void => {
+    byTitle.clear()
+    for (const [key, existing] of byKey) {
+      const slot = titleSlot(existing)
+      if (slot !== undefined && !byTitle.has(slot)) byTitle.set(slot, key)
+    }
+  }
   const absorb = (candidate: Candidate): void => {
     // Never let an identity-less record into the table: its key would be the
     // empty string and every such record would merge into one ghost row.
     if (!hasIdentity(candidate) || candidate.key === '') return
-    const slot = titleSlot(candidate)
-    const twin = slot === undefined ? undefined : byTitle.get(slot)
-    const target = twin !== undefined && twin !== candidate.key ? twin : candidate.key
-    const existing = byKey.get(target)
-    const merged = existing === undefined ? candidate : mergeCandidates(existing, candidate)
-    byKey.set(target, merged)
-    if (target !== candidate.key && target !== merged.key) byKey.delete(target)
-    const mergedSlot = titleSlot(merged)
-    if (mergedSlot !== undefined) byTitle.set(mergedSlot, merged.key)
+
+    let merged = candidate
+    const absorbedKeys = new Set<string>()
+    let absorbed = true
+    while (absorbed) {
+      absorbed = false
+      const slot = titleSlot(merged)
+      const titleTwin = slot === undefined ? undefined : byTitle.get(slot)
+      for (const key of [merged.key, titleTwin]) {
+        if (key === undefined || absorbedKeys.has(key)) continue
+        const existing = byKey.get(key)
+        if (existing === undefined) continue
+        absorbedKeys.add(key)
+        merged = mergeCandidates(existing, merged)
+        absorbed = true
+      }
+    }
+
+    // A merge can promote a title key to a stronger identifier key. Remove all
+    // absorbed entries first, then write exactly once under the recomputed key.
+    for (const key of absorbedKeys) byKey.delete(key)
+    byKey.set(merged.key, merged)
+    // Rebuild derived title aliases so rekeys and model title changes cannot
+    // leave a stale slot pointing at a deleted key.
+    rebuildByTitle()
   }
 
   for (const source of sources) {
@@ -360,7 +403,7 @@ export function extractCandidates(
     if (source.role === 'tool') {
       if (options.includeTools !== true) continue
       for (const identifier of identifiers) {
-        if (identifier.kind !== 'doi' && identifier.kind !== 'arxiv' && identifier.kind !== 'url') continue
+        if (identifier.kind !== 'doi' && identifier.kind !== 'arxiv' && identifier.kind !== 'pmid' && identifier.kind !== 'pmcid' && identifier.kind !== 'url') continue
         if (identifier.kind === 'url' && identifier.confidence < 0.7) continue
         absorb(candidateFromIdentifier(identifier, source.seq))
       }

@@ -1,5 +1,5 @@
 /**
- * Transport layer for the four registries (§5.3).
+ * Transport layer for the registries (§5.3).
  *
  * Everything here is injectable so the whole verification path can be exercised
  * without a network: `fetcher`, clock, timeouts and cache are options. The
@@ -19,6 +19,12 @@ import {
   dataciteDoiUrl,
   openalexDoiUrl,
   openalexSearchUrl,
+  parsePmcSearchUid,
+  parsePmcSummaryPmid,
+  parsePubMedSummary,
+  pmcSearchUrl,
+  pmcSummaryUrl,
+  pubmedIdUrl,
   parseSourceBody,
 } from './clients.ts'
 import type { BodyBasis } from './clients.ts'
@@ -103,6 +109,34 @@ const defaultFetcher: Fetcher = async (url, init) => {
 
 function sleepMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+const NCBI_EUTILS_PREFIX = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/'
+const NCBI_MIN_REQUEST_INTERVAL_MS = Math.ceil(1_000 / 3)
+let lastNcbiRequestAt = 0
+let ncbiRequestQueue: Promise<void> = Promise.resolve()
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) throw signal.reason ?? new DOMException('The operation was aborted', 'AbortError')
+}
+
+/** Serialize all E-utilities requests in this process to at most 3 per second. */
+async function waitForNcbiRequest(signal?: AbortSignal): Promise<void> {
+  const previous = ncbiRequestQueue
+  let release: () => void = () => {}
+  ncbiRequestQueue = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await previous
+  try {
+    throwIfAborted(signal)
+    const waitMs = Math.max(0, lastNcbiRequestAt + NCBI_MIN_REQUEST_INTERVAL_MS - Date.now())
+    if (waitMs > 0) await sleepMs(waitMs)
+    throwIfAborted(signal)
+    lastNcbiRequestAt = Date.now()
+  } finally {
+    release()
+  }
 }
 
 class AttemptTimeout extends Error {
@@ -204,6 +238,7 @@ async function fetchText(url: string, options: FetchTextOptions): Promise<string
   let lastError: unknown
   for (let attempt = 0; attempt <= options.retries; attempt += 1) {
     try {
+      if (url.startsWith(NCBI_EUTILS_PREFIX)) await waitForNcbiRequest(options.signal)
       const result = await fetchWithTimeout(options.fetcher, url, options.timeoutMs, options.signal)
       if (result.ok) return result.body
       // 4xx other than 429 will not improve on retry.
@@ -245,36 +280,51 @@ interface SourceTask {
   readonly source: SourceId
   readonly url: string
   readonly basis: BodyBasis
+  readonly pmcid?: string | undefined
 }
 
 /** Identity a verification can start from; at least one field must be set. */
 export interface LookupIdentity {
   readonly doi?: string | undefined
   readonly arxivId?: string | undefined
+  readonly pmid?: string | undefined
+  readonly pmcid?: string | undefined
   readonly title?: string | undefined
 }
 
 function tasksFor(identity: LookupIdentity, mailto: string | undefined): SourceTask[] {
   const contact = mailto === undefined ? undefined : { mailto }
+  const pmid = identity.pmid?.trim()
+  const pmcid = identity.pmcid?.trim()
   const doi = identity.doi?.trim()
+  const arxivId = identity.arxivId?.trim()
+  const title = identity.title?.trim()
+  const hasPubMedId = pmid !== undefined && pmid !== ''
+  const hasPmcId = pmcid !== undefined && pmcid !== ''
+  const tasks: SourceTask[] = []
+
+  if (hasPubMedId) {
+    tasks.push({ source: 'pubmed', url: pubmedIdUrl(pmid), basis: 'id' })
+  } else if (hasPmcId) {
+    tasks.push({ source: 'pubmed', url: pmcSearchUrl(pmcid), basis: 'id', pmcid })
+  }
+
   if (doi !== undefined && doi !== '') {
-    return [
+    tasks.push(
       { source: 'crossref', url: crossrefDoiUrl(doi, contact), basis: 'doi' },
       { source: 'datacite', url: dataciteDoiUrl(doi), basis: 'doi' },
       { source: 'openalex', url: openalexDoiUrl(doi, contact), basis: 'doi' },
-    ]
+    )
+  } else if (arxivId !== undefined && arxivId !== '') {
+    tasks.push({ source: 'arxiv', url: arxivIdUrl(arxivId), basis: 'id' })
+  } else if (!hasPubMedId && !hasPmcId && title !== undefined && title !== '') {
+    tasks.push(
+      { source: 'crossref', url: crossrefSearchUrl(title, 5, contact), basis: 'search' },
+      { source: 'openalex', url: openalexSearchUrl(title, 5, contact), basis: 'search' },
+      { source: 'arxiv', url: arxivSearchUrl(title, 5), basis: 'search' },
+    )
   }
-  const arxivId = identity.arxivId?.trim()
-  if (arxivId !== undefined && arxivId !== '') {
-    return [{ source: 'arxiv', url: arxivIdUrl(arxivId), basis: 'id' }]
-  }
-  const title = identity.title?.trim()
-  if (title === undefined || title === '') return []
-  return [
-    { source: 'crossref', url: crossrefSearchUrl(title, 5, contact), basis: 'search' },
-    { source: 'openalex', url: openalexSearchUrl(title, 5, contact), basis: 'search' },
-    { source: 'arxiv', url: arxivSearchUrl(title, 5), basis: 'search' },
-  ]
+  return tasks
 }
 
 /**
@@ -302,18 +352,39 @@ export async function lookupRecords(identity: LookupIdentity, options: LookupOpt
   if (callerSignal?.aborted === true) forwardAbort()
   else callerSignal?.addEventListener('abort', forwardAbort, { once: true })
 
+  const fetchOptions: FetchTextOptions = {
+    fetcher,
+    cache,
+    now,
+    sleep,
+    retries,
+    retryDelayMs,
+    timeoutMs: sourceTimeoutMs,
+    signal: lookupController.signal,
+  }
+
   const run = async (task: SourceTask): Promise<{ source: SourceId; records?: SourceRecord[]; error?: unknown }> => {
     try {
-      const body = await fetchText(task.url, {
-        fetcher,
-        cache,
-        now,
-        sleep,
-        retries,
-        retryDelayMs,
-        timeoutMs: sourceTimeoutMs,
-        signal: lookupController.signal,
-      })
+      if (task.pmcid !== undefined) {
+        const searchBody = await fetchText(task.url, fetchOptions)
+        const uid = parsePmcSearchUid(searchBody)
+        // Cache each step only after its response matches that endpoint's contract.
+        cache?.set(task.url, searchBody, now())
+        if (uid === undefined) return { source: task.source, records: [] }
+
+        const pmcUrl = pmcSummaryUrl(uid)
+        const pmcBody = await fetchText(pmcUrl, fetchOptions)
+        const pmid = parsePmcSummaryPmid(pmcBody, uid)
+        cache?.set(pmcUrl, pmcBody, now())
+
+        const pubmedUrl = pubmedIdUrl(pmid)
+        const pubmedBody = await fetchText(pubmedUrl, fetchOptions)
+        const records = parsePubMedSummary(pubmedBody)
+        cache?.set(pubmedUrl, pubmedBody, now())
+        return { source: task.source, records }
+      }
+
+      const body = await fetchText(task.url, fetchOptions)
       const records = parseSourceBody(task.source, task.basis, body)
       // A 2xx response is not a cacheable success until its body matches the
       // requested source contract. Otherwise a transient HTML/malformed body
@@ -402,6 +473,8 @@ export interface VerificationClaim {
   readonly year?: number | undefined
   readonly doi?: string | undefined
   readonly arxivId?: string | undefined
+  readonly pmid?: string | undefined
+  readonly pmcid?: string | undefined
 }
 
 /** Look the candidate up and judge it. The only network entry point in M2. */
@@ -415,9 +488,17 @@ export async function verifyCandidate(
     year: input.year,
     doi: input.doi ?? '',
     arxivId: input.arxivId ?? '',
+    pmid: input.pmid ?? '',
+    pmcid: input.pmcid ?? '',
   }
   const lookup = await lookupRecords(
-    { doi: candidate.doi, arxivId: candidate.arxivId, title: candidate.title },
+    {
+      doi: candidate.doi,
+      arxivId: candidate.arxivId,
+      pmid: candidate.pmid,
+      pmcid: candidate.pmcid,
+      title: candidate.title,
+    },
     options,
   )
   // Identifier-only lookups (a bare DOI/arXiv id) carry no claim to compare

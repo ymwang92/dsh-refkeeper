@@ -7,7 +7,7 @@
  */
 
 /** The authoritative registries this plugin trusts. */
-export type SourceId = 'crossref' | 'openalex' | 'arxiv' | 'datacite'
+export type SourceId = 'crossref' | 'openalex' | 'arxiv' | 'datacite' | 'pubmed'
 
 /** One work as a registry reported it, normalized to the fields we compare. */
 export interface SourceRecord {

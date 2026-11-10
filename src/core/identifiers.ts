@@ -8,7 +8,7 @@
  */
 
 /** What kind of identifier a hit pins down. */
-export type IdentifierKind = 'doi' | 'arxiv' | 'isbn' | 'report' | 'url'
+export type IdentifierKind = 'doi' | 'arxiv' | 'pmid' | 'pmcid' | 'isbn' | 'report' | 'url'
 
 /** One identifier occurrence inside the scanned text. */
 export interface IdentifierHit {
@@ -85,8 +85,20 @@ function trimTrailing(raw: string): string {
 // 10.1175/1520-0442(2004)017<2335:ASPDSI>2.0.CO;2, so <> are part of the id.
 const DOI = /\b10\.\d{4,9}\/[-._;()/:a-z0-9<>]+/giu
 const ARXIV_BARE = /\barxiv\s*:\s*(\d{4}\.\d{4,5})(?:v\d+)?/giu
-const ARXIV_URL = /\barxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5})(?:v\d+)?/giu
-/** ISBN-13: 978/979 prefix, compact (`9780306406157`) or grouped (`978-0-306-40615-7`). */
+const ARXIV_OLD_CATEGORIES =
+  '(?:astro-ph|cond-mat|cs|econ|gr-qc|hep-ex|hep-lat|hep-ph|hep-th|math-ph|math|nlin|nucl-ex|nucl-th|physics|q-bio|q-fin|stat)'
+const ARXIV_OLD_ID = `${ARXIV_OLD_CATEGORIES}(?:\\.[a-z0-9-]+)?/\\d{7,8}`
+// The bare pattern must not fire inside a URL path: `https://example.com/cs/0112017`
+// is a page, not an arXiv id. Absolute arxiv.org URLs are matched separately by
+// ARXIV_URL, which knows the host, so excluding `/` here loses nothing.
+const ARXIV_OLD = new RegExp(`(?<![/\\w])(?:arxiv\\s*:\\s*)?(${ARXIV_OLD_ID})(?:v\\d+)?\\b`, 'giu')
+const ARXIV_URL_SOURCE =
+  `\\barxiv\\.org\\/(?:abs|pdf)\\/((?:\\d{4}\\.\\d{4,5})|${ARXIV_OLD_ID})(?:v\\d+)?`
+const ARXIV_URL = new RegExp(ARXIV_URL_SOURCE, 'giu')
+const ARXIV_URL_IN_URL = new RegExp(ARXIV_URL_SOURCE, 'iu')
+/** PMID and PMCID identifiers must be explicitly labeled to avoid numeric false positives. */
+const PMID = /\bPMID[:\s]\s*(\d{6,8})\b/giu
+const PMCID = /\bPMCID[:\s]\s*(PMC\d+)\b/giu
 const ISBN13 = /\b(97[89][\d\-\s]{8,16}[\dXx])\b/gu
 /**
  * Bare ISBN-10 only counts when the text labels it: the shape test alone
@@ -151,9 +163,9 @@ function push(
 /**
  * Extract every identifier occurrence in one text block.
  *
- * Ordering is by kind priority (doi, arxiv, isbn, report, url) rather than by
- * position, because later stages want "what did we pin down" first and "what
- * might be interesting" last.
+ * Ordering is by kind priority (doi, arxiv, pmid, pmcid, isbn, report, url)
+ * rather than by position, because later stages want "what did we pin down"
+ * first and "what might be interesting" last.
  */
 export function extractIdentifiers(text: string): IdentifierHit[] {
   const hits: IdentifierHit[] = []
@@ -174,7 +186,7 @@ export function extractIdentifiers(text: string): IdentifierHit[] {
       push(hits, seen, { kind: 'doi', value, raw, host, confidence: 0.95 })
       continue
     }
-    const arxivInUrl = raw.match(/arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5})/iu)
+    const arxivInUrl = ARXIV_URL_IN_URL.exec(raw)
     if (arxivInUrl?.[1] !== undefined) {
       push(hits, seen, {
         kind: 'arxiv',
@@ -216,6 +228,18 @@ export function extractIdentifiers(text: string): IdentifierHit[] {
     })
   }
 
+  for (const match of text.matchAll(ARXIV_OLD)) {
+    const id = match[1]
+    if (id === undefined) continue
+    push(hits, seen, {
+      kind: 'arxiv',
+      value: normalizeArxiv(id),
+      raw: match[0],
+      host: '',
+      confidence: 0.92,
+    })
+  }
+
   for (const match of text.matchAll(ARXIV_URL)) {
     const id = match[1]
     if (id === undefined) continue
@@ -226,6 +250,18 @@ export function extractIdentifiers(text: string): IdentifierHit[] {
       host: 'arxiv.org',
       confidence: 0.92,
     })
+  }
+
+  for (const match of text.matchAll(PMID)) {
+    const value = match[1]
+    if (value === undefined) continue
+    push(hits, seen, { kind: 'pmid', value, raw: match[0], host: '', confidence: 0.98 })
+  }
+
+  for (const match of text.matchAll(PMCID)) {
+    const value = match[1]
+    if (value === undefined) continue
+    push(hits, seen, { kind: 'pmcid', value: value.toUpperCase(), raw: match[0], host: '', confidence: 0.98 })
   }
 
   for (const match of text.matchAll(ISBN13)) {

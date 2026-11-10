@@ -88,8 +88,8 @@ describe('URL construction', () => {
     expect(arxivSearchUrl('all:attention')).toContain('search_query=all%3Aattention')
   })
 
-  it('orders sources crossref, openalex, arxiv, datacite', () => {
-    expect(SOURCE_ORDER).toEqual(['crossref', 'openalex', 'arxiv', 'datacite'])
+  it('orders sources crossref, openalex, arxiv, datacite, pubmed', () => {
+    expect(SOURCE_ORDER).toEqual(['crossref', 'openalex', 'arxiv', 'datacite', 'pubmed'])
   })
 })
 

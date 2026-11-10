@@ -22,6 +22,15 @@ describe('dedupeKey', () => {
     ).toBe('doi:10.1/x')
   })
 
+  it('prioritizes PMID and PMCID after DOI and arXiv', () => {
+    const candidate = {
+      key: '', doi: '', arxivId: '', pmid: '12345678', pmcid: 'PMC1234567',
+      isbn: '', reportNumber: '', title: 'A Title', year: 2024, url: '',
+    }
+    expect(dedupeKey(candidate)).toBe('pmid:12345678')
+    expect(dedupeKey({ ...candidate, pmid: undefined })).toBe('pmcid:PMC1234567')
+  })
+
   it('falls back to normalized title + year', () => {
     const a = dedupeKey({ key: '', doi: '', arxivId: '', isbn: '', reportNumber: '', title: 'Attention Is All You Need', year: 2017, url: '' })
     const b = dedupeKey({ key: '', doi: '', arxivId: '', isbn: '', reportNumber: '', title: 'attention  is all you need', year: 2017, url: '' })
@@ -39,6 +48,16 @@ describe('extractCandidates', () => {
     expect(candidates).toHaveLength(1)
     expect(candidates[0]?.evidence).toEqual([3, 9])
     expect(candidates[0]?.doi).toBe('10.1038/s41586-024-00001-x')
+  })
+
+  it('attaches both labeled PubMed identifiers from the citation line', () => {
+    const candidate = citationCandidate(
+      'Smith, J. (2020). A study of PubMed identifiers. Journal of Testing, 1(2), 3-4. PMID: 12345678 PMCID: PMC1234567',
+      6,
+    )
+    expect(candidate.pmid).toBe('12345678')
+    expect(candidate.pmcid).toBe('PMC1234567')
+    expect(candidate.key).toBe('pmid:12345678')
   })
 
   it('skips a bare weak URL but keeps a strong publisher URL', () => {
@@ -79,6 +98,21 @@ describe('mergeCandidates', () => {
     expect(merged.authors).toEqual(['Vaswani, A.'])
     expect(merged.origins).toEqual(expect.arrayContaining(['citation', 'model']))
     expect(merged.needsModelEnrichment).toBe(false)
+  })
+
+  it('rekeys a title candidate when a PMID is added', () => {
+    const fromCitation = citationCandidate(
+      'Smith, J. (2020). A study of rekeying. Journal of Testing, 1(2), 3-4.',
+      1,
+    )
+    const fromModel = candidateFromModel({
+      title: 'A study of rekeying',
+      year: 2020,
+      authors: ['Smith, J.'],
+      pmid: '12345678',
+    })
+    expect(fromCitation.key).toMatch(/^title:/u)
+    expect(mergeCandidates(fromCitation, fromModel).key).toBe('pmid:12345678')
   })
 
   it('keeps the existing value when only the incoming field is empty', () => {
@@ -130,6 +164,17 @@ describe('identity requirement', () => {
     expect(candidates).toEqual([])
   })
 
+  it('reindexes a title candidate when a later same-title citation adds PMID', () => {
+    const candidates = extractCandidates([
+      { seq: 1, text: 'Smith, J. (2020). A study of rekeying. Journal of Testing, 1(2), 3-4.' },
+      { seq: 2, text: 'PMID: 12345678' },
+      { seq: 3, text: 'Smith, J. (2020). A study of rekeying. Journal of Testing, 1(2), 3-4. PMID: 12345678' },
+    ])
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0]?.key).toBe('pmid:12345678')
+    expect(candidates[0]?.evidence).toEqual([1, 2, 3])
+  })
+
   it('keeps a citation with a real title', () => {
     const candidates = extractCandidates([
       { seq: 4, text: 'Zhang, S., & Li, W. (2024). Attention is not all you need. Nature Machine Intelligence, 6(3), 45-67.' },
@@ -143,17 +188,19 @@ describe('tool output is opt-in', () => {
   const toolOutput = {
     seq: 9,
     role: 'tool' as const,
-    text: 'found 10.1000/abc and arXiv:2401.01234; see also Zhang, S. (2024). A Title. Journal, 1(2), 3-4. and https://example.com/x and https://www.nature.com/articles/abc',
+    text: 'found 10.1000/abc and arXiv:2401.01234; PMID: 12345678 and PMCID: PMC1234567; see also Zhang, S. (2024). A Title. Journal, 1(2), 3-4. and https://example.com/x and https://www.nature.com/articles/abc',
   }
 
   it('excludes tool output by default', () => {
     expect(extractCandidates([toolOutput])).toEqual([])
   })
 
-  it('opts in to tool DOI, arXiv and strong URL candidates, but not citations or weak URLs', () => {
+  it('opts in to tool DOI, arXiv, PubMed IDs and strong URL candidates, but not citations or weak URLs', () => {
     const candidates = extractCandidates([toolOutput], { includeTools: true })
     expect(candidates.map((candidate) => candidate.doi)).toContain('10.1000/abc')
     expect(candidates.map((candidate) => candidate.arxivId)).toContain('2401.01234')
+    expect(candidates.map((candidate) => candidate.pmid)).toContain('12345678')
+    expect(candidates.map((candidate) => candidate.pmcid)).toContain('PMC1234567')
     expect(candidates.map((candidate) => candidate.url)).toContain('https://www.nature.com/articles/abc')
     expect(candidates.map((candidate) => candidate.url)).not.toContain('https://example.com/x')
     expect(candidates.map((candidate) => candidate.title)).not.toContain('A Title')

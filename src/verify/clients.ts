@@ -10,7 +10,7 @@
 import type { SourceId, SourceRecord } from './types.ts'
 
 /** Registries, in the order the verifier should try them. */
-export const SOURCE_ORDER: readonly SourceId[] = ['crossref', 'openalex', 'arxiv', 'datacite']
+export const SOURCE_ORDER: readonly SourceId[] = ['crossref', 'openalex', 'arxiv', 'datacite', 'pubmed']
 
 /**
  * Optional `mailto` for the polite pool.
@@ -241,7 +241,7 @@ export function parseArxivFeed(xml: string): SourceRecord[] {
     const block = match[1] ?? ''
     const title = xmlText(block, 'title')
     const idUrl = xmlText(block, 'id')
-    const arxivId = /\/abs\/([^/\s]+)$/u.exec(idUrl)?.[1] ?? ''
+    const arxivId = /\/abs\/((?:[^/\s?#]+\/)?[^/\s?#]+)(?:[?#][^\s]*)?$/u.exec(idUrl)?.[1] ?? ''
     if (title === '' || arxivId === '') return []
     const authors = [...block.matchAll(/<author\b[^>]*>([\s\S]*?)<\/author>/gu)].flatMap((author) => {
       const name = xmlText(author[1] ?? '', 'name')
@@ -339,6 +339,166 @@ function jsonEnvelope(source: SourceId, body: string): Record<string, unknown> {
   }
   if (!isRecord(raw)) throw new SourceBodyError(source, 'body is not a JSON object')
   return raw
+}
+
+export function pubmedIdUrl(pmid: string): string {
+  // Built like the DOI URL helpers: an identifier that cannot resolve is a
+  // lookup that comes back empty, not a thrown error. Throwing here aborted
+  // the whole verification — and with it the save — when a user typed a
+  // PMCID into the PMID box.
+  return `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${encodeURIComponent(pmid)}&retmode=json&tool=dsh-refkeeper`
+}
+
+export function pmcSearchUrl(pmcid: string): string {
+  return `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pmc&term=${encodeURIComponent(`${pmcid.toUpperCase()}[pmc]`)}&retmode=json&tool=dsh-refkeeper`
+}
+
+export function pmcSummaryUrl(uid: string): string {
+  return `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pmc&id=${encodeURIComponent(uid)}&retmode=json&tool=dsh-refkeeper`
+}
+
+function cleanPubMedTitle(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  return value
+    .replace(/<[^>]*>/gu, ' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .replace(/\.$/u, '')
+    .trim()
+}
+
+function pubmedAuthorName(value: unknown): string | undefined {
+  const name = textOf(value)
+  if (name === undefined || name.includes(',')) return name
+  const match = /^(.+)\s+(\S+)$/u.exec(name)
+  return match === null ? name : `${match[1]}, ${match[2]}`
+}
+
+function pubmedYear(value: unknown): number | undefined {
+  if (typeof value !== 'string') return undefined
+  const match = /\b(\d{4})\b/u.exec(value)
+  return match === null ? undefined : Number(match[1])
+}
+
+/** Parse the ESearch db=pmc response to its internal PMC UID (not a PMID). */
+export function parsePmcSearchUid(json: string): string | undefined {
+  const raw = jsonEnvelope('pubmed', json)
+  const result = isRecord(raw['esearchresult']) ? raw['esearchresult'] : undefined
+  if (result === undefined || !Array.isArray(result['idlist'])) {
+    throw new SourceBodyError('pubmed', 'missing esearchresult.idlist[]')
+  }
+  const ids = result['idlist']
+  if (!ids.every((id) => typeof id === 'string' && /^\d+$/u.test(id))) {
+    throw new SourceBodyError('pubmed', 'esearch result contains invalid PMC UIDs')
+  }
+  return ids[0] as string | undefined
+}
+
+/** PMC ESummary uses an internal UID; extract its linked PubMed identifier. */
+export function parsePmcSummaryPmid(json: string, uid: string): string {
+  const raw = jsonEnvelope('pubmed', json)
+  const result = isRecord(raw['result']) ? raw['result'] : undefined
+  const work = result !== undefined && isRecord(result[uid]) ? result[uid] : undefined
+  if (work === undefined) throw new SourceBodyError('pubmed', 'missing PMC summary record')
+  const articleids = work['articleids']
+  if (!Array.isArray(articleids)) throw new SourceBodyError('pubmed', 'missing PMC articleids[]')
+  const pmid = articleids.find((entry) =>
+    isRecord(entry) && entry['idtype'] === 'pmid' && typeof entry['value'] === 'string'
+  )
+  const value = isRecord(pmid) ? textOf(pmid['value']) : undefined
+  if (value === undefined || !/^\d{6,8}$/u.test(value)) {
+    throw new SourceBodyError('pubmed', 'PMC summary has no valid PMID')
+  }
+  return value
+}
+
+/** Parse one or more PubMed ESummary records into the verifier's common shape. */
+/**
+ * PubMed's `pubtype` mixes publication kinds with study design — a record can
+ * read `["Comparative Study", "Journal Article", "Research Support, Non-U.S.
+ * Gov't"]`. The first entry is therefore not the document type. Pick the first
+ * recognised publication kind and map it onto the reference types the exporters
+ * know; anything unrecognised falls back to a journal article.
+ */
+const PUBMED_REF_TYPE: Readonly<Record<string, string>> = {
+  'journal article': 'journalArticle',
+  review: 'journalArticle',
+  'review article': 'journalArticle',
+  'systematic review': 'journalArticle',
+  letter: 'journalArticle',
+  comment: 'journalArticle',
+  editorial: 'journalArticle',
+  news: 'journalArticle',
+  'book review': 'journalArticle',
+  'published erratum': 'journalArticle',
+  book: 'book',
+  'book chapter': 'book',
+  monograph: 'book',
+  conference: 'conferencePaper',
+  'conference paper': 'conferencePaper',
+  'congress': 'conferencePaper',
+  'proceedings': 'conferencePaper',
+  preprint: 'preprint',
+  thesis: 'thesis',
+  dissertation: 'thesis',
+  report: 'report',
+  'technical report': 'report',
+  'working paper': 'report',
+  webpage: 'webpage',
+  'internet resource': 'webpage',
+  'database': 'webpage',
+}
+
+function pubmedRefType(pubtypes: readonly string[]): string {
+  for (const raw of pubtypes) {
+    const hit = PUBMED_REF_TYPE[raw.trim().toLowerCase()]
+    if (hit !== undefined) return hit
+  }
+  return 'journalArticle'
+}
+
+export function parsePubMedSummary(json: string): SourceRecord[] {
+  const raw = jsonEnvelope('pubmed', json)
+  const result = isRecord(raw['result']) ? raw['result'] : undefined
+  if (result === undefined || !Array.isArray(result['uids'])) {
+    throw new SourceBodyError('pubmed', 'missing result.uids[]')
+  }
+  const uids = result['uids']
+  if (!uids.every((uid) => typeof uid === 'string' && /^\d{6,8}$/u.test(uid))) {
+    throw new SourceBodyError('pubmed', 'summary contains invalid PMID values')
+  }
+  return uids.map((uid) => {
+    const work = result[uid]
+    if (!isRecord(work)) throw new SourceBodyError('pubmed', 'missing summary record')
+    const title = cleanPubMedTitle(work['title'])
+    if (title === '') throw new SourceBodyError('pubmed', 'summary record has no title')
+    const authors = Array.isArray(work['authors'])
+      ? work['authors'].flatMap((author) => {
+          if (!isRecord(author)) return []
+          const name = pubmedAuthorName(author['name'])
+          return name === undefined ? [] : [name]
+        })
+      : []
+    const articleids = Array.isArray(work['articleids']) ? work['articleids'] : []
+    const doiEntry = articleids.find((entry) => isRecord(entry) && entry['idtype'] === 'doi')
+    const doi = isRecord(doiEntry) ? textOf(doiEntry['value'])?.replace(/^doi:\s*/iu, '').toLowerCase() ?? '' : ''
+    const lang = Array.isArray(work['lang']) ? strings(work['lang'])[0] : undefined
+    return {
+      source: 'pubmed',
+      id: uid,
+      title,
+      authors,
+      year: pubmedYear(work['pubdate']),
+      container: textOf(work['fulljournalname']) ?? textOf(work['source']) ?? '',
+      doi,
+      type: pubmedRefType(Array.isArray(work['pubtype']) ? strings(work['pubtype']) : []),
+      url: `https://pubmed.ncbi.nlm.nih.gov/${uid}/`,
+      volume: textOf(work['volume']),
+      issue: textOf(work['issue']),
+      pages: textOf(work['pages']),
+      language: lang,
+    }
+  })
 }
 
 function workOfWork(source: SourceId, raw: Record<string, unknown>): Record<string, unknown> {
@@ -468,6 +628,10 @@ export function parseSourceBody(source: SourceId, basis: BodyBasis, body: string
     const record = parseOpenAlexWork(raw)
     if (record === undefined) throw new SourceBodyError(source, 'work has neither DOI nor title')
     return [record]
+  }
+  if (source === 'pubmed') {
+    if (basis !== 'id') throw new SourceBodyError(source, 'only exact-ID lookups are supported')
+    return parsePubMedSummary(body)
   }
   // Crossref
   const raw = jsonEnvelope(source, body)

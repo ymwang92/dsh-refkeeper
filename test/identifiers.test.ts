@@ -7,6 +7,7 @@ import {
   normalizeDoi,
   normalizeIsbn,
 } from '../src/core/identifiers.ts'
+import { arxivIdUrl, parseArxivFeed } from '../src/verify/clients.ts'
 
 function kinds(text: string): string[] {
   return extractIdentifiers(text).map((hit) => `${hit.kind}:${hit.value}`)
@@ -43,6 +44,75 @@ describe('extractIdentifiers', () => {
 
   it('reads bare arXiv mentions', () => {
     expect(kinds('preprint arXiv: 2106.09685')).toEqual(['arxiv:2106.09685'])
+  })
+
+  it('reads old-style arXiv IDs without rewriting their category', () => {
+    expect(kinds('arXiv:math.GT/0309136v2')).toEqual(['arxiv:math.GT/0309136'])
+    expect(kinds('math.GT/0309136')).toEqual(['arxiv:math.GT/0309136'])
+    expect(kinds('cs/0112017')).toEqual(['arxiv:cs/0112017'])
+    expect(normalizeArxiv('math.GT/0309136v2')).toBe('math.GT/0309136')
+  })
+
+  it('recognizes labeled PMID and PMCID identifiers but rejects naked numbers', () => {
+    expect(kinds('PMID: 12345678')).toEqual(['pmid:12345678'])
+    expect(kinds('PMCID: PMC1234567')).toEqual(['pmcid:PMC1234567'])
+    expect(kinds('pmid 123456')).toEqual(['pmid:123456'])
+    for (const text of ['20240101', 'sample 12345678', 'run 98765432', 'PMID: 12345', 'PMCID: 1234567']) {
+      expect(kinds(text)).toEqual([])
+    }
+  })
+
+  it('accepts only the documented legacy arXiv category prefixes', () => {
+    const ids = [
+      'astro-ph/0309136', 'cond-mat/0309136', 'cs/0112017', 'econ/0309136',
+      'gr-qc/0309136', 'hep-ex/0309136', 'hep-lat/0309136', 'hep-ph/0309136',
+      'hep-th/9901001', 'math/0309136', 'math-ph/0309136', 'nlin/0309136',
+      'nucl-ex/0309136', 'nucl-th/0309136', 'physics/0309136', 'q-bio/0309136',
+      'q-fin/0309136', 'stat/0309136', 'math.GT/0309136', 'cond-mat.stat-mech/0309110',
+    ]
+    for (const id of ids) expect(kinds(id)).toEqual([`arxiv:${id}`])
+    expect(kinds('not-a-category/0309136')).toEqual([])
+  })
+
+  it('recognizes old-style arXiv abs and pdf URLs as IDs rather than plain URLs', () => {
+    for (const url of [
+      'https://arxiv.org/abs/math.GT/0309136',
+      'https://arxiv.org/pdf/math.GT/0309136v2',
+    ]) {
+      expect(extractIdentifiers(url)).toMatchObject([
+        { kind: 'arxiv', value: 'math.GT/0309136', host: 'arxiv.org' },
+      ])
+    }
+  })
+
+  it('does not mistake ordinary dates, fractions, or new-style IDs for legacy IDs', () => {
+    for (const text of ['3/14/2001', '12/25/1999', '1/2']) {
+      expect(kinds(text)).toEqual([])
+    }
+    expect(kinds('arXiv:2301.00001')).toEqual(['arxiv:2301.00001'])
+    expect(kinds('arXiv:2301.00001v2')).toEqual(['arxiv:2301.00001'])
+  })
+
+  it('does not read a legacy arXiv id out of somebody else\'s URL path', () => {
+    for (const url of ['https://example.com/cs/0112017', 'https://example.com/math/12345678']) {
+      // The URL itself is still a URL; what must not happen is an arXiv id
+      // being read out of its path.
+      expect(extractIdentifiers(url).filter((hit) => hit.kind === 'arxiv')).toEqual([])
+    }
+    // The absolute arxiv.org URL still resolves, through the URL branch.
+    expect(kinds('https://arxiv.org/abs/math.GT/0309136')).toEqual(['arxiv:math.GT/0309136'])
+  })
+
+  it('preserves old-style arXiv IDs through exact lookup and Atom feed parsing', () => {
+    expect(new URL(arxivIdUrl('math.GT/0309136')).searchParams.get('id_list'))
+      .toBe('math.GT/0309136')
+    const records = parseArxivFeed(`<feed><entry>
+      <id>https://arxiv.org/abs/math.GT/0309136</id>
+      <title>Old-style arXiv paper</title>
+      <author><name>Example Author</name></author>
+      <published>2003-09-13T00:00:00Z</published>
+    </entry></feed>`)
+    expect(records[0]?.id).toBe('math.GT/0309136')
   })
 
   it('recognises report numbers and standards', () => {

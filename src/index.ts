@@ -486,10 +486,15 @@ function storeDeps(cwd: string, signal?: AbortSignal): StoreCommandDeps {
     // RIS `N1`, annotated.md `⚑ manual`), so the switch is safe to flip later,
     // but not before the GUI can show that label to the user.
     allowManualConfirm: false,
-    resolveIdentifiers: async (doi, arxivId) => {
-      if (doi === '' && arxivId === '') return undefined
+    resolveIdentifiers: async (doi, arxivId, pmid, pmcid) => {
+      if (doi === '' && arxivId === '' && pmid === '' && pmcid === '') return undefined
       const outcome = await verifyCandidate(
-        { ...(doi === '' ? {} : { doi }), ...(arxivId === '' ? {} : { arxivId }) },
+        {
+          ...(doi === '' ? {} : { doi }),
+          ...(arxivId === '' ? {} : { arxivId }),
+          ...(pmid === '' ? {} : { pmid }),
+          ...(pmcid === '' ? {} : { pmcid }),
+        },
         { cache: verifyCache },
       )
       const wanted = doi.toLowerCase()
@@ -995,6 +1000,8 @@ function mount(ctx: Context) {
                           {
                             doi: candidate.doi,
                             arxivId: candidate.arxivId,
+                            ...(candidate.pmid === undefined ? {} : { pmid: candidate.pmid }),
+                            ...(candidate.pmcid === undefined ? {} : { pmcid: candidate.pmcid }),
                           },
                           { cache: verifyCache },
                         )

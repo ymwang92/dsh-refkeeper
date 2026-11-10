@@ -1,9 +1,6 @@
 /**
- * Verification barrel (M2).
- *
- * Exported as a module rather than wired into the host on purpose: the M2 gate
- * is "clients + judgement are correct against fixtures", and the network
- * orchestration (fetch, timeout, cache, backoff) is still open.
+ * Public verification helpers shared by the host and fixture tests.
+ * Network orchestration and caching are implemented in lookup.ts.
  */
 
 export {
@@ -19,6 +16,12 @@ export {
   parseDataciteWork,
   parseOpenAlexSearch,
   parseOpenAlexWork,
+  parsePmcSearchUid,
+  parsePmcSummaryPmid,
+  parsePubMedSummary,
+  pmcSearchUrl,
+  pmcSummaryUrl,
+  pubmedIdUrl,
 } from './clients.ts'
 export { familyName, firstAuthorMatches, titleMatches, titleSimilarity, yearMatches } from './match.ts'
 export { MIN_RECORD_SCORE, judgeCandidate, scoreRecord } from './judge.ts'
