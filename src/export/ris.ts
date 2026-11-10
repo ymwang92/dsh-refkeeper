@@ -47,6 +47,8 @@ export function renderRisEntry(ref: StoredReference): string {
   if (ref.identifiers.arxiv) rows.push(['AN', `arXiv:${ref.identifiers.arxiv}`])
   if (ref.identifiers.isbn) rows.push(['SN', ref.identifiers.isbn])
   if (ref.identifiers.reportNumber) rows.push(['AN', ref.identifiers.reportNumber])
+  if (ref.identifiers.pmid) rows.push(['AN', `PMID:${ref.identifiers.pmid}`])
+  if (ref.identifiers.pmcid) rows.push(['AN', `PMC:${ref.identifiers.pmcid}`])
   if (ref.url) rows.push(['UR', ref.url])
   const annotation = ref.annotation
   if (annotation?.summary) rows.push(['AB', annotation.summary])

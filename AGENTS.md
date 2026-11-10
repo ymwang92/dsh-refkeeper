@@ -135,32 +135,27 @@ console.log(fs.existsSync(d)?'守卫在拦删除':'删除正常')"
 
 **下次遇到「测试大面积失败」的第一反应**：先跑上面那条判定命令，别急着改实现。
 
-## 当前阶段：B2 已完成 + 存储层进行中（PMID / PMCID 持久化与面板）
+## 当前阶段：B2 与存储层已完成 + PMID / PMCID 导出支持已完成（2026-11-10）
 
-**B2 核验已完成（2026-11-10；真实 PMID / PMCID E2E 由用户确认 3/3）**：标签式标识符识别、transient Candidate、PubMed ESummary / PMCID crosswalk、共享 cache / timeout / retry、离线 fixture 与核验接线均已完成。B2 时未把 PMID / PMCID 写入 `StoredReference` 或导出字段。
+**B2 核验与存储层已完成**：标签式 PMID / PMCID 识别、PubMed ESummary / PMCID crosswalk、共享 cache / timeout / retry、可选存储字段与面板编辑/显示均已交付。`SCHEMA_VERSION=1`，`referenceIdentityKey`、`referenceId` 与既有去重行为保持不变；PMID / PMCID 不参与 identity。真实库验收由用户执行。
 
-**本阶段已实现（2026-11-10；自动化门禁通过；GUI / E2E 按用户要求未运行）**：
+**本次导出变更**：
 
 | 文件 | 内容 |
 |---|---|
-| `src/store/types.ts` | `RefIdentifiers` 增加可选 `pmid` / `pmcid`；`SCHEMA_VERSION` 保持 1 |
-| `src/store/io.ts` | 从 nested / flat identifiers 读取 PMID / PMCID；PMID 去空白，PMCID 去空白并转大写 |
-| `src/core/batch.ts` | `BatchFields` / `BatchEntry` 与 sanitizers 保留两类标识符，供捕获快照和面板使用 |
-| `src/host/capture-save.ts` | 捕获保存时把标识符送入正常 verified-save payload，并保留在 batch entry；本文件是本阶段唯一额外获准的 Host 例外 |
-| `src/host/store-command.ts` | `/refs edit` 将两类标识符更新到 `current.identifiers`；`EDITABLE_TEXT` 仍仅含书目元数据 |
-| `src/client.tsx`、`src/ui/strings.ts` | 详情字段与草稿支持 PMID / PMCID；中英文均显示通用标签 `PMID` / `PMCID` |
-| `test/store.test.ts`、`test/capture-batch.test.ts`、`test/capture-save.test.ts`、`test/store-command.test.ts` | 覆盖 flat / nested 归一化、batch 快照、PMID / PMCID-only 捕获与编辑保存 |
+| `src/export/bibtex.ts` | PMID / PMCID 追加到既有合并 note；保留 caveats / manual note，不创建第二个 note |
+| `src/export/ris.ts` | 增加 `AN  - PMID:` / `AN  - PMC:`，位于既有标识 AN 行之后、URL 之前；其余标签顺序不变 |
+| `test/export.test.ts` | 精确断言 BibTeX 单一 note、RIS 行顺序及缺失标识时不生成空行 |
 
-**硬边界（保持不变）**：`SCHEMA_VERSION=1`；`referenceIdentityKey` 与 `referenceId` 不改；PMID / PMCID 均不参与去重，尤其 PMCID 不得作为 identity。标识符存放于 `StoredReference.identifiers`，不加入 `EDITABLE_TEXT`、export schema 或新增迁移。除本表所列文件外，不得改 `src/index.ts`、`src/verify/`、`src/export/`、依赖或发布文档；不得运行 GUI、真实库写入、E2E 或联网测试，真实验收由用户执行。
+**硬边界**：仅修改 `src/export/bibtex.ts`、`src/export/ris.ts`、`test/export.test.ts` 与本节；`src/export/index.ts`、其他源码、依赖与发布文档未改。无 GUI、联网或 E2E。构建产生的 `lib/index.js` 已恢复，未留在最终改动中。
 
 **验收状态**：
 
-- [x] `npm run typecheck` 通过。
-- [x] `npx vitest run --maxWorkers=1`：28 files / 383 tests 全过；定向存储回归：4 files / 96 tests 全过。
+- [x] `npx vitest run --maxWorkers=1 test/export.test.ts`：1 file / 18 tests 通过。
+- [x] `npm run typecheck` 通过；`npx vitest run --maxWorkers=1`：28 files / 386 tests 通过。
 - [x] `npm run build && node --check lib/client.js` 通过；`jsx-runtime` / `choose` grep 均为 0；`git diff --check` 通过。
-- [ ] GUI / 真实库验收：按用户要求由用户执行，代理不启动 GUI、不联网、不写真实库。
 
-**实现判据**：`referenceIdentityKey`、`referenceId` 与既有 DOI / arXiv / ISBN / report 去重行为保持原样；PMID / PMCID 仅作为可选 stored identifiers 与 batch/UI 字段。
+**实现判据**：BibTeX PMID / PMCID 与 DOI、abstract、caveats、manual note 合并在一个 note；RIS 以既有字段顺序追加 PMID / PMCID AN，不改原 DOI / ISBN / arXiv / report 行。
 
 ### 验收时发现并修掉的漏洞：PubMed URL 构造器不该 throw（2026-11-10）
 
@@ -188,6 +183,25 @@ verifyCandidate({ pmid: '25882522' })   → verified 3/3
 「构造出 URL 且不抛错」的断言。
 
 ### 核验层的两条约定
+
+### ★ `lib/` 是 git 跟踪的构建产物，改了 `src/` 必须重新 build 并提交 `lib/` ★
+
+`lib/index.js`（宿主侧）与 `lib/client.js`（客户端侧）都在版本控制里，
+`npm run build` 会重新生成它们。**`dsh plugin add github:ymwang92/dsh-refkeeper`
+装的是仓库本身，`npm` 包里带的也是这两个文件** —— 源码改了而构建产物没跟上，
+用户拿到的就是旧功能。
+
+2026-11-10 导出层那批改动就踩了这个：源码改对了、测试也过了，
+但 `lib/index.js` 被还原成了改动前的版本，导出层的功能没有进到发布产物里。
+
+**判断方法**：
+
+```sh
+grep -cE 'PMID: |PMC: ' lib/index.js     # 改了什么，这里就该有几处
+```
+
+**每次改完 `src/` 都要**：`npm run build` → 确认 `git status` 里 `lib/` 是 M →
+提交时把它一起 `git add`。
 
 **① URL 构造器永远不 throw。** 标识符解析不了就是**查不到**（服务器返 404，fetch 层接住），
 不是抛错。新增 registry 时照 `crossrefDoiUrl` 的样子写。

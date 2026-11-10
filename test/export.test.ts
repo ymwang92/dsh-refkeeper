@@ -68,6 +68,25 @@ describe('bibtex export', () => {
     expect(renderBibtex([withNote])).toBe(once)
   })
 
+  it('keeps PMID and PMCID in the existing single note with caveats and manual status', () => {
+    const entry = renderBibtex([
+      ref({
+        identifiers: {
+          doi: '10.1038/nature12373',
+          pmid: '25882522',
+          pmcid: 'PMC7840891',
+        },
+        annotation: { caveats: 'Small sample.' },
+        verification: { status: 'manual', checkedAt: NOW },
+      }),
+    ])
+    expect(entry).toContain('doi = {10.1038/nature12373}')
+    const notes = entry.split('\n').filter((line) => line.startsWith('  note = '))
+    expect(notes).toEqual([
+      '  note = {Small sample. Manual entry: stored without registry verification. PMID: 25882522 PMC: PMC7840891}',
+    ])
+  })
+
   it('labels a manual entry so a .bib reader cannot mistake it for verified', () => {
     const manual = ref({ verification: { status: 'manual', checkedAt: NOW } })
     const entry = renderBibtex([manual])
@@ -95,6 +114,46 @@ describe('ris export', () => {
     expect(entry).toContain('EP  - 58')
     expect(entry).toContain('DO  - 10.1038/nature12373')
     expect(entry.trimEnd().endsWith('ER  -')).toBe(true)
+  })
+
+  it('adds PMID and PMCID AN rows after existing identifier rows', () => {
+    const entry = renderRisEntry(
+      ref({
+        identifiers: {
+          doi: '10.1038/nature12373',
+          arxiv: '1706.03762',
+          isbn: '9781450375631',
+          reportNumber: 'RPT-17',
+          pmid: '25882522',
+          pmcid: 'PMC7840891',
+        },
+        url: 'https://example.test/reference',
+      }),
+    )
+    const rows = entry.split('\n').filter((line) => line !== '')
+    const expectedOrder = [
+      'DO  - 10.1038/nature12373',
+      'AN  - arXiv:1706.03762',
+      'SN  - 9781450375631',
+      'AN  - RPT-17',
+      'AN  - PMID:25882522',
+      'AN  - PMC:PMC7840891',
+      'UR  - https://example.test/reference',
+    ]
+    const positions = expectedOrder.map((row) => rows.indexOf(row))
+    expect(positions.every((position) => position >= 0)).toBe(true)
+    expect(positions).toEqual([...positions].sort((left, right) => left - right))
+  })
+
+  it('omits empty PubMed identifiers and notes', () => {
+    const reference = ref()
+    const bibtex = renderBibtex([reference])
+    const ris = renderRisEntry(reference)
+    expect(bibtex).not.toContain('note =')
+    expect(bibtex).not.toContain('PMID:')
+    expect(bibtex).not.toContain('PMC:')
+    expect(ris).not.toContain('AN  - PMID:')
+    expect(ris).not.toContain('AN  - PMC:')
   })
 
   it('labels annotations with N1 rows', () => {

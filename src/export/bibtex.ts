@@ -121,6 +121,8 @@ export function bibtexFields(ref: StoredReference): Array<[string, string]> {
   const noteParts = [
     annotation?.caveats ?? '',
     ref.verification.status === 'manual' ? MANUAL_NOTE : '',
+    ref.identifiers.pmid ? `PMID: ${ref.identifiers.pmid}` : '',
+    ref.identifiers.pmcid ? `PMC: ${ref.identifiers.pmcid}` : '',
   ].filter((part) => part !== '')
   if (noteParts.length > 0) push('note', escapeBibtex(noteParts.join(' ')))
   return fields
