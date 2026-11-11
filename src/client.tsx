@@ -559,7 +559,7 @@ function EntryDetails(props: {
     : manualOutcome === 'unconfirmed' || editNotice ? UI_TOKENS.color.neutral : UI_TOKENS.color.success
 
   const groupDefinitions = [
-    { key: 'identifiers', label: text.groupIdentifiers, fields: ['type', 'doi', 'arxivId', 'url'] },
+    { key: 'identifiers', label: text.groupIdentifiers, fields: ['type', 'doi', 'arxivId', 'pmid', 'pmcid', 'url'] },
     { key: 'bibliography', label: text.groupBibliography, fields: ['title', 'authors', 'containerTitle', 'pages', 'language'] },
     { key: 'publication', label: text.groupPublication, fields: ['year', 'volume', 'issue', 'publisher', 'publisherPlace'] },
   ] as const
