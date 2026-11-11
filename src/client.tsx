@@ -497,6 +497,8 @@ function payloadFromDraft(draft: Record<string, string>): Record<string, unknown
   return payload
 }
 
+const ENTRY_DETAILS_FORM_ID = 'dsh-refkeeper-entry-details-form'
+
 function EntryDetails(props: {
   readonly entry: BatchEntry
   readonly rowKey: string
@@ -506,10 +508,9 @@ function EntryDetails(props: {
   readonly onManualSave: (entry: BatchEntry, payload: Record<string, unknown>) => boolean
   readonly onPromote: (entry: BatchEntry, manual: boolean) => void
   readonly manualOutcome?: ManualSaveOutcome
-  readonly manualSaveDisabled: boolean
   readonly onTitleRef: (element: HTMLTextAreaElement | null) => void
 }): React.ReactElement {
-  const { entry, rowKey, mode, text, onEdit, onManualSave, onPromote, manualOutcome, manualSaveDisabled, onTitleRef } = props
+  const { entry, rowKey, mode, text, onEdit, onManualSave, onPromote, manualOutcome, onTitleRef } = props
   const [draft, setDraft] = React.useState<Record<string, string>>(() => createDraftOf(entry))
   const [validationError, setValidationError] = React.useState(false)
   const [editNotice, setEditNotice] = React.useState(false)
@@ -574,7 +575,17 @@ function EntryDetails(props: {
       : null,
     React.createElement(
       'form',
-      { onSubmit: submit, style: { display: 'grid', gap: UI_TOKENS.layout.groupGap, minWidth: 0 } },
+      {
+        id: ENTRY_DETAILS_FORM_ID,
+        onSubmit: submit,
+        onReset: (event: React.FormEvent<HTMLFormElement>) => {
+          event.preventDefault()
+          setDraft(createDraftOf(entry))
+          setValidationError(false)
+          setEditNotice(false)
+        },
+        style: { display: 'grid', gap: UI_TOKENS.layout.groupGap, minWidth: 0 },
+      },
       ...groupDefinitions.map((group) => React.createElement(
         'section',
         { key: group.key, style: { display: 'grid', gap: UI_TOKENS.layout.fieldGap, minWidth: 0 } },
@@ -624,25 +635,13 @@ function EntryDetails(props: {
             React.createElement('button', { type: 'button', onClick: () => onPromote(entry, false), style: BASE_BUTTON }, text.promoteVerify),
             React.createElement('button', { type: 'button', onClick: () => onPromote(entry, true), style: BASE_BUTTON }, text.promoteManual))
         : null,
-      React.createElement(
-        'div',
-        { style: { display: 'flex', gap: UI_TOKENS.layout.labelGap, flexWrap: 'wrap' } },
-        React.createElement('button', {
-          type: 'submit',
-          disabled: mode === 'create' && (manualOutcome === 'pending' || manualSaveDisabled),
-          style: BASE_BUTTON,
-        }, mode === 'create' ? text.manualSave : text.detailsSave),
-        React.createElement('button', {
-          type: 'button',
-          onClick: () => { setDraft(createDraftOf(entry)); setValidationError(false); setEditNotice(false) },
-          style: BASE_BUTTON,
-        }, text.detailsReset),
-      ),
     ),
   )
 }
 
 interface PanelViewProps {
+  readonly view: PanelView
+  readonly onViewChange: (view: PanelView) => void
   readonly batch: CaptureBatch | undefined
   readonly text: Strings
   readonly sessionId?: string
@@ -657,8 +656,7 @@ interface PanelViewProps {
 }
 
 function PanelView(props: PanelViewProps): React.ReactElement {
-  const { batch, text, sessionId, isPicked, onToggle, onEdit, onPromote, onManualSave, titleOf, pickedCount, onRefresh } = props
-  const [view, setView] = React.useState<PanelView>({ kind: 'list' })
+  const { view, onViewChange, batch, text, sessionId, isPicked, onToggle, onEdit, onPromote, onManualSave, titleOf, pickedCount, onRefresh } = props
   const [updatedRows, setUpdatedRows] = React.useState<{ readonly batchKey: string; readonly rows: Readonly<Record<string, BatchEntry>> }>({ batchKey: '', rows: {} })
   const [pendingSave, setPendingSave] = React.useState<{ readonly rowKey: string; readonly baselineSize: number; readonly expectedArgs: string; readonly commandId?: string; readonly batchKey: string; readonly entry: BatchEntry; readonly payload: Record<string, unknown> } | undefined>(undefined)
   const [manualFeedback, setManualFeedback] = React.useState<{ readonly rowKey: string; readonly outcome: ManualSaveOutcome } | undefined>(undefined)
@@ -678,11 +676,11 @@ function PanelView(props: PanelViewProps): React.ReactElement {
   React.useEffect(() => {
     if (priorBatchKey.current === batchKey) return
     priorBatchKey.current = batchKey
-    setView({ kind: 'list' })
+    onViewChange({ kind: 'list' })
     setUpdatedRows({ batchKey, rows: {} })
     setPendingSave(undefined)
     setManualFeedback(undefined)
-  }, [batchKey])
+  }, [batchKey, onViewChange])
 
   React.useEffect(() => {
     if (pendingSave === undefined) return
@@ -715,7 +713,7 @@ function PanelView(props: PanelViewProps): React.ReactElement {
 
   const leaveDetail = (): void => {
     restoreFocusOnList.current = true
-    setView({ kind: 'list' })
+    onViewChange({ kind: 'list' })
   }
 
   React.useEffect(() => {
@@ -746,7 +744,7 @@ function PanelView(props: PanelViewProps): React.ReactElement {
     const rowKey = String(index)
     restoreFocusKey.current = `${rowKey}:${trigger}`
     listScrollTop.current = listRef.current?.scrollTop ?? 0
-    setView({ kind: 'detail', id: rowKey, mode })
+    onViewChange({ kind: 'detail', id: rowKey, mode })
   }
 
   const submitManual = (entry: BatchEntry, payload: Record<string, unknown>, rowKey: string): boolean => {
@@ -776,25 +774,39 @@ function PanelView(props: PanelViewProps): React.ReactElement {
       : pendingSave?.rowKey === rowKey ? 'pending' : undefined
     return React.createElement(
       'div',
-      { style: { display: 'grid', gap: UI_TOKENS.layout.sectionGap, minWidth: 0 } },
-      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: UI_TOKENS.layout.labelGap, minWidth: 0 } },
+      { style: { display: 'flex', flexDirection: 'column', flex: '1 1 auto', minHeight: 0, minWidth: 0 } },
+      React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: UI_TOKENS.layout.labelGap, minWidth: 0, flexShrink: 0 } },
         React.createElement('button', { type: 'button', onClick: leaveDetail, style: { ...BASE_BUTTON, flexShrink: 0 } }, `← ${text.detailBack}`),
         React.createElement('strong', { style: { fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, view.mode === 'create' ? text.detailCreate : text.detailEdit)),
-      React.createElement('div', { title, style: { fontSize: UI_TOKENS.fontSize.control, fontWeight: 500, overflowWrap: 'anywhere' } }, title),
-      React.createElement('div', { style: { fontSize: UI_TOKENS.fontSize.caption, color: UI_TOKENS.color.neutral } }, entryMeta(entry, text)),
-      React.createElement(EntryDetails, {
-        key: `${rowKey}:${view.mode}`,
-        entry,
-        rowKey,
-        mode: view.mode,
-        text,
-        onEdit,
-        onManualSave: (currentEntry, payload) => submitManual(currentEntry, payload, rowKey),
-        onPromote,
-        manualOutcome: feedback,
-        manualSaveDisabled: pendingSave !== undefined,
-        onTitleRef: (element) => { titleRef.current = element },
-      }),
+      React.createElement(
+        'div',
+        { style: { display: 'grid', alignContent: 'start', gap: UI_TOKENS.layout.sectionGap, flex: '1 1 auto', minHeight: 0, minWidth: 0, overflowY: 'auto' } },
+        React.createElement('div', { title, style: { fontSize: UI_TOKENS.fontSize.control, fontWeight: 500, overflowWrap: 'anywhere' } }, title),
+        React.createElement('div', { style: { fontSize: UI_TOKENS.fontSize.caption, color: UI_TOKENS.color.neutral } }, entryMeta(entry, text)),
+        React.createElement(EntryDetails, {
+          key: `${rowKey}:${view.mode}`,
+          entry,
+          rowKey,
+          mode: view.mode,
+          text,
+          onEdit,
+          onManualSave: (currentEntry, payload) => submitManual(currentEntry, payload, rowKey),
+          onPromote,
+          manualOutcome: feedback,
+          onTitleRef: (element) => { titleRef.current = element },
+        }),
+      ),
+      React.createElement(
+        'div',
+        { style: { display: 'flex', justifyContent: 'flex-end', gap: UI_TOKENS.layout.labelGap, flexWrap: 'wrap', flexShrink: 0, paddingTop: UI_TOKENS.spacing.xs, borderTop: '1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.2))' } },
+        React.createElement('button', {
+          type: 'submit',
+          form: ENTRY_DETAILS_FORM_ID,
+          disabled: view.mode === 'create' && (feedback === 'pending' || pendingSave !== undefined),
+          style: BASE_BUTTON,
+        }, view.mode === 'create' ? text.manualSave : text.detailsSave),
+        React.createElement('button', { type: 'reset', form: ENTRY_DETAILS_FORM_ID, style: BASE_BUTTON }, text.detailsReset),
+      ),
     )
   }
 
@@ -1008,6 +1020,10 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
     setDirDraft(rememberedDir)
   }
   const batchKey = batch === undefined ? '' : `${batch.capturedAt}:${String(batch.entries.length)}`
+  const [view, setView] = React.useState<PanelView>({ kind: 'list' })
+  React.useEffect(() => {
+    if (!current.open) setView({ kind: 'list' })
+  }, [current.open])
   const [ticks, setTicks] = React.useState<{ key: string; picked: Record<string, boolean> }>({
     key: '',
     picked: {},
@@ -1111,40 +1127,53 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
   return ReactDOM.createPortal(
     React.createElement(
       'section',
-      { style: PANEL_STYLE, 'aria-label': 'dsh-refkeeper panel' },
-    React.createElement(
-      'div',
-      { style: { ...ROW_STYLE, justifyContent: 'space-between' } },
-      React.createElement('strong', null, `❝ ${text.heading}`),
-      React.createElement(
-        'button',
-        { type: 'button', onClick: () => setState({ open: false }), style: { ...BASE_BUTTON, height: '24px', padding: '0 6px' } },
-        text.close,
-      ),
-    ),
-    React.createElement(
-      'div',
-      { style: { ...ROW_STYLE, marginTop: '6px' } },
-      React.createElement('span', { style: { opacity: 0.7 } }, `${text.scopeLabel}:`),
-      scopeOption('turn', text.scopeTurn),
-      scopeOption('lastN', text.scopeLastN),
-      current.scope === 'lastN'
-        ? React.createElement('input', {
-            type: 'number',
-            min: 1,
-            max: 500,
-            value: current.turns,
-            'aria-label': text.turnsLabel,
-            onChange: (event: React.ChangeEvent<HTMLInputElement>) => {
-              const parsed = Number.parseInt(event.target.value, 10)
-              setState({ turns: Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 500) : 1 })
-            },
-            style: { ...FIELD_STYLE, width: '64px' },
-          })
-        : null,
-      scopeOption('all', text.scopeAll),
-    ),
+      {
+        style: view.kind === 'list'
+          ? PANEL_STYLE
+          : { ...PANEL_STYLE, display: 'flex', flexDirection: 'column', overflowY: 'hidden' },
+        'aria-label': 'dsh-refkeeper panel',
+      },
+    view.kind === 'list'
+      ? React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(
+            'div',
+            { style: { ...ROW_STYLE, justifyContent: 'space-between' } },
+            React.createElement('strong', null, `❝ ${text.heading}`),
+            React.createElement(
+              'button',
+              { type: 'button', onClick: () => setState({ open: false }), style: { ...BASE_BUTTON, height: '24px', padding: '0 6px' } },
+              text.close,
+            ),
+          ),
+          React.createElement(
+            'div',
+            { style: { ...ROW_STYLE, marginTop: '6px' } },
+            React.createElement('span', { style: { opacity: 0.7 } }, `${text.scopeLabel}:`),
+            scopeOption('turn', text.scopeTurn),
+            scopeOption('lastN', text.scopeLastN),
+            current.scope === 'lastN'
+              ? React.createElement('input', {
+                  type: 'number',
+                  min: 1,
+                  max: 500,
+                  value: current.turns,
+                  'aria-label': text.turnsLabel,
+                  onChange: (event: React.ChangeEvent<HTMLInputElement>) => {
+                    const parsed = Number.parseInt(event.target.value, 10)
+                    setState({ turns: Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 500) : 1 })
+                  },
+                  style: { ...FIELD_STYLE, width: '64px' },
+                })
+              : null,
+            scopeOption('all', text.scopeAll),
+          ),
+        )
+      : null,
     React.createElement(PanelView, {
+      view,
+      onViewChange: setView,
       batch,
       text,
       isPicked,
@@ -1161,81 +1190,87 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
         return submitted
       },
     }),
-    React.createElement(
-      'div',
-      { style: { ...ROW_STYLE, marginTop: '4px', justifyContent: 'space-between', gap: '8px' } },
-      React.createElement(
-        'span',
-        {
-          title: rememberedDir === '' ? text.defaultDirUnset : rememberedDir,
-          style: { flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.75 },
-        },
-        `${text.defaultDirLabel}: ${rememberedDir === '' ? text.defaultDirUnset : rememberedDir}`,
-      ),
-    ),
-    React.createElement(
-      'div',
-      { style: { ...ROW_STYLE, marginTop: '4px', gap: '6px', flexWrap: 'nowrap' } },
-      React.createElement('input', {
-        type: 'text',
-        value: dirDraft,
-        placeholder: text.dirPlaceholder,
-        spellCheck: false,
-        'aria-label': text.defaultDirLabel,
-        onChange: (event: React.ChangeEvent<HTMLInputElement>) => {
-          setDirDraft(event.target.value)
-        },
-        style: { ...FIELD_STYLE, flex: '1 1 auto', minWidth: 0 },
-      }),
-      React.createElement(
-        'button',
-        {
-          type: 'button',
-          onClick: () => run(`/refs dir ${encodeFlag('set', dirDraft.trim())}`),
-          disabled: dirDraft.trim() === '',
-          style: { ...BASE_BUTTON, flexShrink: 0, opacity: dirDraft.trim() === '' ? 0.5 : 1 },
-        },
-        text.dirSave,
-      ),
-      React.createElement(
-        'button',
-        { type: 'button', onClick: () => run('/refs dir --clear'), style: { ...BASE_BUTTON, flexShrink: 0 } },
-        text.dirClearLabel,
-      ),
-    ),
-    React.createElement(
-      'div',
-      { style: { ...ROW_STYLE, marginTop: '4px' } },
-      React.createElement('span', { style: { opacity: 0.75 } }, `${text.formatLabel}:`),
-      formatOption('bibtex', text.formatBibtex),
-      formatOption('ris', text.formatRis),
-    ),
-    React.createElement(
-      'div',
-      { style: { ...ROW_STYLE, marginTop: '8px' } },
-      React.createElement(
-        'button',
-        {
-          type: 'button',
-          onClick: () => run(captureLine(current)),
-          style: { ...BASE_BUTTON, borderColor: 'var(--dsw-alias-brand-primary, #1f6feb)' },
-        },
-        `❝ ${text.capture}`,
-      ),
-      React.createElement(
-        'button',
-        { type: 'button', disabled: !canExport, onClick: () => run(exportLine(current, selectionFlag)), style: exportStyle() },
-        text.export,
-      ),
-      React.createElement(
-        'button',
-        { type: 'button', disabled: !canExport, onClick: () => run(exportLine(current, '--all')), style: exportStyle() },
-        text.exportAll,
-      ),
-    ),
-      notice === ''
-        ? null
-        : React.createElement('div', { style: { marginTop: '6px', color: UI_TOKENS.color.warning } }, notice),
+    view.kind === 'list'
+      ? React.createElement(
+          React.Fragment,
+          null,
+          React.createElement(
+            'div',
+            { style: { ...ROW_STYLE, marginTop: '4px', justifyContent: 'space-between', gap: '8px' } },
+            React.createElement(
+              'span',
+              {
+                title: rememberedDir === '' ? text.defaultDirUnset : rememberedDir,
+                style: { flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', opacity: 0.75 },
+              },
+              `${text.defaultDirLabel}: ${rememberedDir === '' ? text.defaultDirUnset : rememberedDir}`,
+            ),
+          ),
+          React.createElement(
+            'div',
+            { style: { ...ROW_STYLE, marginTop: '4px', gap: '6px', flexWrap: 'nowrap' } },
+            React.createElement('input', {
+              type: 'text',
+              value: dirDraft,
+              placeholder: text.dirPlaceholder,
+              spellCheck: false,
+              'aria-label': text.defaultDirLabel,
+              onChange: (event: React.ChangeEvent<HTMLInputElement>) => {
+                setDirDraft(event.target.value)
+              },
+              style: { ...FIELD_STYLE, flex: '1 1 auto', minWidth: 0 },
+            }),
+            React.createElement(
+              'button',
+              {
+                type: 'button',
+                onClick: () => run(`/refs dir ${encodeFlag('set', dirDraft.trim())}`),
+                disabled: dirDraft.trim() === '',
+                style: { ...BASE_BUTTON, flexShrink: 0, opacity: dirDraft.trim() === '' ? 0.5 : 1 },
+              },
+              text.dirSave,
+            ),
+            React.createElement(
+              'button',
+              { type: 'button', onClick: () => run('/refs dir --clear'), style: { ...BASE_BUTTON, flexShrink: 0 } },
+              text.dirClearLabel,
+            ),
+          ),
+          React.createElement(
+            'div',
+            { style: { ...ROW_STYLE, marginTop: '4px' } },
+            React.createElement('span', { style: { opacity: 0.75 } }, `${text.formatLabel}:`),
+            formatOption('bibtex', text.formatBibtex),
+            formatOption('ris', text.formatRis),
+          ),
+          React.createElement(
+            'div',
+            { style: { ...ROW_STYLE, marginTop: '8px' } },
+            React.createElement(
+              'button',
+              {
+                type: 'button',
+                onClick: () => run(captureLine(current)),
+                style: { ...BASE_BUTTON, borderColor: 'var(--dsw-alias-brand-primary, #1f6feb)' },
+              },
+              `❝ ${text.capture}`,
+            ),
+            React.createElement(
+              'button',
+              { type: 'button', disabled: !canExport, onClick: () => run(exportLine(current, selectionFlag)), style: exportStyle() },
+              text.export,
+            ),
+            React.createElement(
+              'button',
+              { type: 'button', disabled: !canExport, onClick: () => run(exportLine(current, '--all')), style: exportStyle() },
+              text.exportAll,
+            ),
+          ),
+          notice === ''
+            ? null
+            : React.createElement('div', { style: { marginTop: '6px', color: UI_TOKENS.color.warning } }, notice),
+        )
+      : null,
     ),
     document.body,
   )
