@@ -644,6 +644,7 @@ interface PanelViewProps {
   readonly onViewChange: (view: PanelView) => void
   readonly batch: CaptureBatch | undefined
   readonly text: Strings
+  readonly notice: string
   readonly sessionId?: string
   readonly isPicked: (entry: BatchEntry) => boolean
   readonly onToggle: (id: string, next: boolean) => void
@@ -656,7 +657,7 @@ interface PanelViewProps {
 }
 
 function PanelView(props: PanelViewProps): React.ReactElement {
-  const { view, onViewChange, batch, text, sessionId, isPicked, onToggle, onEdit, onPromote, onManualSave, titleOf, pickedCount, onRefresh } = props
+  const { view, onViewChange, batch, text, notice, sessionId, isPicked, onToggle, onEdit, onPromote, onManualSave, titleOf, pickedCount, onRefresh } = props
   const [updatedRows, setUpdatedRows] = React.useState<{ readonly batchKey: string; readonly rows: Readonly<Record<string, BatchEntry>> }>({ batchKey: '', rows: {} })
   const [pendingSave, setPendingSave] = React.useState<{ readonly rowKey: string; readonly baselineSize: number; readonly expectedArgs: string; readonly commandId?: string; readonly batchKey: string; readonly entry: BatchEntry; readonly payload: Record<string, unknown> } | undefined>(undefined)
   const [manualFeedback, setManualFeedback] = React.useState<{ readonly rowKey: string; readonly outcome: ManualSaveOutcome } | undefined>(undefined)
@@ -796,6 +797,9 @@ function PanelView(props: PanelViewProps): React.ReactElement {
           onTitleRef: (element) => { titleRef.current = element },
         }),
       ),
+      notice !== ''
+        ? React.createElement('div', { style: { marginTop: '6px', color: UI_TOKENS.color.warning, flexShrink: 0 } }, notice)
+        : null,
       React.createElement(
         'div',
         { style: { display: 'flex', justifyContent: 'flex-end', gap: UI_TOKENS.layout.labelGap, flexWrap: 'wrap', flexShrink: 0, paddingTop: UI_TOKENS.spacing.xs, borderTop: '1px solid var(--dsw-alias-border-l1, rgba(128,128,128,.2))' } },
@@ -810,6 +814,7 @@ function PanelView(props: PanelViewProps): React.ReactElement {
     )
   }
 
+  const savedCount = batch?.entries.filter((entry) => entry.status === 'saved').length ?? 0
   if (batch === undefined) {
     return React.createElement(
       'div',
@@ -821,7 +826,10 @@ function PanelView(props: PanelViewProps): React.ReactElement {
 
   return React.createElement(
     'div',
-    { ref: listRef, style: { marginTop: UI_TOKENS.spacing.md, display: 'grid', gap: UI_TOKENS.spacing.sm, minWidth: 0 } },
+    { ref: listRef, style: { marginTop: UI_TOKENS.spacing.md, display: 'grid', gap: UI_TOKENS.spacing.sm, minWidth: 0, flex: '1 1 auto', minHeight: 0, overflowY: 'auto' } },
+    savedCount > 0
+      ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary, rgba(128,128,128,.82))', fontSize: UI_TOKENS.fontSize.caption, flexShrink: 0 } }, text.storedNotice.replace('{n}', String(savedCount)))
+      : null,
     React.createElement('div', { style: { ...ROW_STYLE, justifyContent: 'space-between', gap: UI_TOKENS.spacing.sm } },
       React.createElement('span', { style: { fontWeight: 500 } }, `${text.batchHeading} · ${String(entries.length)}`),
       React.createElement('div', { style: { ...ROW_STYLE, flexShrink: 0 } },
@@ -945,7 +953,9 @@ const PANEL_STYLE: React.CSSProperties = {
   width: '420px',
   maxWidth: 'calc(100vw - 32px)',
   maxHeight: 'calc(100vh - 140px)',
-  overflowY: 'auto',
+  display: 'flex',
+  flexDirection: 'column',
+  overflowY: 'hidden',
   minWidth: 0,
   boxSizing: 'border-box',
   margin: 0,
@@ -1139,7 +1149,7 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
           null,
           React.createElement(
             'div',
-            { style: { ...ROW_STYLE, justifyContent: 'space-between' } },
+            { style: { ...ROW_STYLE, justifyContent: 'space-between', flexShrink: 0 } },
             React.createElement('strong', null, `❝ ${text.heading}`),
             React.createElement(
               'button',
@@ -1149,7 +1159,7 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
           ),
           React.createElement(
             'div',
-            { style: { ...ROW_STYLE, marginTop: '6px' } },
+            { style: { ...ROW_STYLE, marginTop: '6px', flexShrink: 0 } },
             React.createElement('span', { style: { opacity: 0.7 } }, `${text.scopeLabel}:`),
             scopeOption('turn', text.scopeTurn),
             scopeOption('lastN', text.scopeLastN),
@@ -1176,6 +1186,7 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
       onViewChange: setView,
       batch,
       text,
+      notice,
       isPicked,
       onToggle,
       onEdit,
@@ -1196,7 +1207,7 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
           null,
           React.createElement(
             'div',
-            { style: { ...ROW_STYLE, marginTop: '4px', justifyContent: 'space-between', gap: '8px' } },
+            { style: { ...ROW_STYLE, marginTop: '4px', justifyContent: 'space-between', gap: '8px', flexShrink: 0 } },
             React.createElement(
               'span',
               {
@@ -1208,7 +1219,7 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
           ),
           React.createElement(
             'div',
-            { style: { ...ROW_STYLE, marginTop: '4px', gap: '6px', flexWrap: 'nowrap' } },
+            { style: { ...ROW_STYLE, marginTop: '4px', gap: '6px', flexWrap: 'nowrap', flexShrink: 0 } },
             React.createElement('input', {
               type: 'text',
               value: dirDraft,
@@ -1238,14 +1249,14 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
           ),
           React.createElement(
             'div',
-            { style: { ...ROW_STYLE, marginTop: '4px' } },
+            { style: { ...ROW_STYLE, marginTop: '4px', flexShrink: 0 } },
             React.createElement('span', { style: { opacity: 0.75 } }, `${text.formatLabel}:`),
             formatOption('bibtex', text.formatBibtex),
             formatOption('ris', text.formatRis),
           ),
           React.createElement(
             'div',
-            { style: { ...ROW_STYLE, marginTop: '8px' } },
+            { style: { ...ROW_STYLE, marginTop: '8px', flexShrink: 0 } },
             React.createElement(
               'button',
               {
@@ -1268,7 +1279,7 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
           ),
           notice === ''
             ? null
-            : React.createElement('div', { style: { marginTop: '6px', color: UI_TOKENS.color.warning } }, notice),
+            : React.createElement('div', { style: { marginTop: '6px', color: UI_TOKENS.color.warning, flexShrink: 0 } }, notice),
         )
       : null,
     ),
