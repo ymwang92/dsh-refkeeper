@@ -4,7 +4,7 @@
 
 ![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg) [![npm](https://img.shields.io/npm/v/dsh-refkeeper.svg)](https://www.npmjs.com/package/dsh-refkeeper) [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件。它读取一段对话，把对话里引用过的文献收集起来，逐条到 Crossref、OpenAlex、arXiv、DataCite 核对，通过核对的条目导出为 BibTeX 或 RIS。没通过的放进单独的隔离文件，不进主库。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件。它读取一段对话，把对话里引用过的文献收集起来，逐条到 Crossref、OpenAlex、arXiv、DataCite、PubMed 核对，通过核对的条目导出为 BibTeX 或 RIS。没通过的放进单独的隔离文件，不进主库。
 
 ![右上角的捕获面板](docs/images/panel.png)
 
@@ -12,10 +12,11 @@
 
 ## 功能
 
-- **收集引用**。范围可以是本轮、前 N 轮或整个对话。识别 DOI、arXiv 编号、ISBN、报告号，也识别按 APA、GB/T 7714、IEEE 格式写出的参考文献行。
-- **对照注册表核对**。只有标题匹配、年份相差不超过一年、第一作者匹配，并且至少有一个注册表返回了记录，条目才会被接受。
+- **收集引用**。范围可以是本轮、前 N 轮或整个对话。识别 DOI、arXiv 编号、PMID、PMCID、ISBN、报告号，也识别按 APA、GB/T 7714、IEEE 格式写出的参考文献行。2007 年以前的旧式 arXiv 编号（`math.GT/0309136`、`cs/0112017`）同样认得。
+- **对照注册表核对**。只有标题匹配、年份相差不超过一年、第一作者匹配，并且至少有一个注册表返回了记录，条目才会被接受。注册表有五个：Crossref、OpenAlex、arXiv、DataCite，加上 PubMed。
 - **生成注解**。捕获后，由当前会话使用的模型为每条写四个字段：摘要、与本书稿的关系、一段原文引证、注意事项。引证如果没在对话里逐字出现，会被丢弃。
-- **导出**。BibTeX、RIS 或两者。导出范围可以是最近一次捕获、你勾选的条目，或整个文献库。
+- **导出**。BibTeX、RIS 或两者。导出范围可以是最近一次捕获、你勾选的条目，或整个文献库。PMID 与 PMCID 会一起写进去。
+- **说清存到哪里**。捕获完成后，面板会告诉你这次存了多少条、存在工作区的 `refs/refs.json`；下面那个「导出到」是 `.bib`/`.ris` 的输出目录，不是文献库。
 
 ## 只有一个按钮
 
@@ -32,7 +33,7 @@
 | | 手动复制 | 让模型生成 `.bib` | 本插件 |
 | --- | --- | --- | --- |
 | 条目从哪来 | 自己往回翻 | 模型的记忆 | 从你选定的对话里解析 |
-| 元数据是否核对 | 没有 | 没有 | Crossref、OpenAlex、arXiv、DataCite |
+| 元数据是否核对 | 没有 | 没有 | Crossref、OpenAlex、arXiv、DataCite、PubMed |
 | 核对不通过时 | 无 | 照样保留 | 移入 `refs/quarantine.json`，不参与导出 |
 | 编造的页码、DOI、作者 | 无 | 可能出现 | 字段取自注册表记录；无依据的字段留空 |
 | 为什么稿子里有这篇 | 丢失 | 丢失 | 注解加一句原文引证 |
@@ -48,7 +49,7 @@
 ## 使用
 
 1. 打开引用过文献的那个对话，点开输入框上方的捕获面板。
-2. 选择范围，点**捕获并保存**。
+2. 选择范围，点**捕获文献**。
 3. 面板会列出哪些已入库、哪些进了 ⚠ 隔离区。取消勾选这次不需要的条目。
 4. 选择 BibTeX 和/或 RIS，点**导出本次捕获**。
 
@@ -103,7 +104,7 @@
    │  标识符：DOI、arXiv 编号、ISBN、报告号
    │  参考文献行：APA、GB/T 7714、IEEE
    ▼
-候选条目 ──► Crossref、OpenAlex、arXiv、DataCite（并行查询）
+候选条目 ──► Crossref、OpenAlex、arXiv、DataCite、PubMed（并行查询）
    │
    ├─ 接受条件：标题匹配 · 年份相差 ±1 · 第一作者匹配
    │             且至少一个注册表返回记录
@@ -132,18 +133,21 @@ GB/T 7714 格式的参考文献行与 APA、IEEE 一起解析。中文标题按�
 | 控件 | 作用 |
 | --- | --- |
 | 范围 | 本轮、前 N 轮、整个对话 |
-| 捕获并保存 | 捕获、核对、生成注解并入库；结果列出保存了哪些、哪些进了隔离区 |
+| 捕获文献 | 捕获、核对、生成注解并入库；结果列出保存了哪些、哪些进了隔离区 |
+| 存储位置 | 列表上方那行说明这次存了多少条、存在工作区的 `refs/refs.json` |
 | 每条前的复选框 | 决定下一次导出包含哪些条目；已入库的默认勾选，⚠ 的默认不勾 |
 | 徽章 | 一眼看出这条的状态：已入表、⚠ 隔离、跳过、失败 |
 | 副行 | 第一作者 · 年份 · 出版物，以及没通过时的那句原因 |
 | 点条目 | 打开独立的编辑页，不挤在列表里 |
-| 编辑页的三组字段 | 标识信息、书目信息、出版信息 |
+| 编辑页的三组字段 | 标识信息（条目类型、DOI、arXiv ID、PMID、PMCID、URL）、书目信息、出版信息 |
 | 条目类型 | 七种类型的下拉框；自由文本会在导出时静默失败 |
 | 手动入表 | 跳过的条目可以在这里补全元数据后入库 |
 | 导出格式 | BibTeX、RIS 或两者 |
-| 文件夹 | 导出目录；留空表示 `refs/exports/` |
+| 导出到 | `.bib`/`.ris` 的输出目录；留空表示 `refs/exports/` |
 | 导出本次捕获 | 写出勾选的条目 |
 | 导出全部文献 | 写出整个文献库 |
+
+列表自己会滚：面板是固定的头尾加中间滚动的一列，文献再多，导出按钮也一直够得着。
 
 点开一条是独立的编辑页，字段按标识、书目、出版分成三组：
 
@@ -227,7 +231,7 @@ refs/exports/           默认导出目录
 
 ## 数据与隐私
 
-- 只有核对请求会离开本机：标识符或标题发给 Crossref、OpenAlex、arXiv、DataCite。
+- 只有核对请求会离开本机：标识符或标题发给 Crossref、OpenAlex、arXiv、DataCite、PubMed。
 - 注解使用会话里已经配置的模型，插件本身不持有 API key。
 - 没有埋点。文献库就是一个本地文件。
 

@@ -4,7 +4,7 @@
 
 ![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg) [![npm](https://img.shields.io/npm/v/dsh-refkeeper.svg)](https://www.npmjs.com/package/dsh-refkeeper) [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 
-A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin. It reads a conversation, collects the papers that conversation cited, checks each paper against Crossref, OpenAlex, arXiv and DataCite, and exports the confirmed entries as BibTeX or RIS. Papers that fail the check go into a separate quarantine file instead of the library.
+A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin. It reads a conversation, collects the papers that conversation cited, checks each paper against Crossref, OpenAlex, arXiv, DataCite and PubMed, and exports the confirmed entries as BibTeX or RIS. Papers that fail the check go into a separate quarantine file instead of the library.
 
 ![The capture panel in the top-right corner](docs/images/panel-en.png)
 
@@ -12,10 +12,11 @@ If this plugin saves you time, a star on GitHub helps other people find it. If y
 
 ## What it does
 
-- **Collects citations.** Scope can be one turn, the last N turns, or the whole session. It recognises DOIs, arXiv ids, ISBNs and report numbers, and also reference lines written in APA, GB/T 7714 or IEEE style.
-- **Checks them against registries.** An entry is accepted only if the title matches, the year is within one year, the first author matches, and at least one registry returned a record.
+- **Collects citations.** Scope can be one turn, the last N turns, or the whole session. It recognises DOIs, arXiv ids, PMIDs, PMCIDs, ISBNs and report numbers, and also reference lines written in APA, GB/T 7714 or IEEE style. Legacy arXiv identifiers from before 2007 — `math.GT/0309136`, `cs/0112017` — are recognised too.
+- **Checks them against registries.** An entry is accepted only if the title matches, the year is within one year, the first author matches, and at least one registry returned a record. There are five registries: Crossref, OpenAlex, arXiv, DataCite and PubMed.
 - **Writes annotations.** After a capture, the model already running the session writes four short fields per entry: a summary, why the paper is relevant here, a supporting quote, and caveats. A quote that does not appear in the conversation is dropped.
-- **Exports.** BibTeX, RIS, or both. The export can cover the last capture, the entries you ticked, or the whole library.
+- **Exports.** BibTeX, RIS, or both. The export can cover the last capture, the entries you ticked, or the whole library. PMIDs and PMCIDs go into the export as well.
+- **Says where the references are stored.** After a capture the panel tells you how many references it stored and that they live in the workspace's `refs/refs.json`. The folder below is where the `.bib` and `.ris` files are written, not where the library is.
 
 ## One button in the composer
 
@@ -32,7 +33,7 @@ Asking the model for a `.bib` file is faster, but models make up page ranges, DO
 | | Copy by hand | Ask a model for a `.bib` | This plugin |
 | --- | --- | --- | --- |
 | Source of the list | your reading | the model's memory | parsed from the conversation you select |
-| Metadata checked | no | no | Crossref, OpenAlex, arXiv, DataCite |
+| Metadata checked | no | no | Crossref, OpenAlex, arXiv, DataCite, PubMed |
 | What happens to a paper that cannot be confirmed | n/a | kept | moved to `refs/quarantine.json`, excluded from export |
 | Invented pages, DOIs, authors | n/a | possible | fields come from registry records; unsupported fields stay empty |
 | Why the paper is there | lost | lost | annotation plus a verbatim quote |
@@ -48,7 +49,7 @@ To track the repository instead of the published version, paste the Git address 
 ## Use
 
 1. Open a conversation that cited papers and open the capture panel above the composer.
-2. Choose the scope, then **Capture & save**.
+2. Choose the scope, then **Capture references**.
 3. The panel lists what was saved and what went to the ⚠ quarantine. Untick any entry you do not want.
 4. Choose BibTeX and/or RIS, then **Export this capture**.
 
@@ -103,7 +104,7 @@ conversation text
    │  identifiers: DOI, arXiv id, ISBN, report number
    │  reference lines: APA, GB/T 7714, IEEE
    ▼
-candidates ──► Crossref, OpenAlex, arXiv, DataCite (queried in parallel)
+candidates ──► Crossref, OpenAlex, arXiv, DataCite, PubMed (queried in parallel)
    │
    ├─ accepted when: title matches · year within ±1 · first author matches
    │                 and at least one registry returned a record
@@ -132,18 +133,21 @@ Registry coverage for Chinese journals is thin: CNKI, Wanfang and CQVIP links ar
 | Control | What it does |
 | --- | --- |
 | Scope | this turn, the last N turns, or the whole session |
-| Capture & save | captures, verifies, annotates and stores; the result lists what was saved and what went to the quarantine |
+| Capture references | captures, verifies, annotates and stores; the result lists what was saved and what went to the quarantine |
+| Where it is stored | the line above the list says how many references this capture stored and that they live in the workspace's `refs/refs.json` |
 | Row checkbox | which entries the next export includes; saved rows are ticked, ⚠ rows are not |
 | Badge | the state of the row at a glance: saved, ⚠ quarantined, skipped, failed |
 | Sub-line | first author · year · venue, plus the reason when the check failed |
 | Click a row | opens an independent edit page instead of expanding inside the list |
-| Three field groups | identifiers, bibliography, publication |
+| Three field groups | identifiers (type, DOI, arXiv id, PMID, PMCID, URL), bibliography, publication |
 | Entry type | a dropdown of the seven types; free text fails silently at export time |
 | Manual entry | a skipped row can be completed here and stored |
 | Format | BibTeX, RIS, or both |
-| Folder | export destination; empty means `refs/exports/` |
+| Export to | where the `.bib` and `.ris` files are written; empty means `refs/exports/` |
 | Export this capture | writes the ticked entries |
 | Export all references | writes the whole library |
+
+The list scrolls on its own: the panel is a fixed header and footer around a scrolling middle, so the export buttons stay reachable however many references the capture brought in.
 
 Opening a row gives you an independent edit page, with the fields grouped into identifiers, bibliography and publication:
 
@@ -230,7 +234,7 @@ All plain JSON and Markdown, so they can be committed with the manuscript and di
 
 ## Data and privacy
 
-- Requests leave the machine only for verification: the identifier or title is sent to Crossref, OpenAlex, arXiv and DataCite.
+- Requests leave the machine only for verification: the identifier or title is sent to Crossref, OpenAlex, arXiv, DataCite and PubMed.
 - Annotations use the model already configured in the session; the plugin holds no API key of its own.
 - No telemetry. The library is a local file.
 
