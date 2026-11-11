@@ -12,6 +12,7 @@ export interface Strings {
   readonly export: string
   readonly exportAll: string
   readonly defaultDirLabel: string
+  readonly storedNotice: string
   readonly defaultDirUnset: string
   readonly dirPlaceholder: string
   readonly dirSave: string
@@ -87,10 +88,11 @@ export const EN: Strings = {
   scopeAll: 'Whole conversation',
   turnsLabel: 'Turns',
   exportSelection: 'Tick the references to export.',
-  capture: 'Capture & save',
+  capture: 'Capture references',
   export: 'Export this capture',
   exportAll: 'Export all references',
-  defaultDirLabel: 'Folder',
+  defaultDirLabel: 'Export to',
+  storedNotice: '{n} saved to refs/refs.json in this workspace',
   defaultDirUnset: 'not set (refs/exports/)',
   dirPlaceholder: 'Paste a folder path…',
   dirSave: 'Save folder',
@@ -164,10 +166,11 @@ export const ZH: Strings = {
   scopeAll: '全部对话',
   turnsLabel: '轮数',
   exportSelection: '勾选需要导出的文献',
-  capture: '捕获并保存',
+  capture: '捕获文献',
   export: '导出本次捕获',
   exportAll: '导出全部文献',
-  defaultDirLabel: '文件夹',
+  defaultDirLabel: '导出到',
+  storedNotice: '{n} 条已存入工作区的 refs/refs.json',
   defaultDirUnset: '未设置（refs/exports/）',
   dirPlaceholder: '粘贴文件夹路径…',
   dirSave: '保存文件夹',
