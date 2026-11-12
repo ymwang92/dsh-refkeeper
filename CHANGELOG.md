@@ -2,99 +2,84 @@
 
 ## 0.1.4 — 2026-11-11
 
-A bare PMID or PMCID in a conversation is now recognised, checked against
-PubMed, stored with the reference, shown in the panel and written into the
-export. The panel itself says where the references are stored, and the edit
-page no longer drags the capture and export controls along with it.
+Compared with v0.1.3, this release adds labeled PMID/PMCID verification and storage, restores historical arXiv identifiers, and clarifies where captured references are stored versus where exports are written.
 
-- **PubMed identifiers are recognised.** `PMID: 12345678` and
-  `PMCID: PMC1234567` used to produce nothing at all: no identifier, no
-  candidate, no lookup. Both are recognised now, in the tagged forms people
-  actually write, and either one is enough to build a candidate.
-- **PubMed is a fifth registry.** A PMID is fetched with esummary; a PMCID is
-  resolved through esearch against the PMC database and then through the PMC
-  summary's own PMID crosswalk. The record supplies the same fields the other
-  registries do, so a reference captured from a PMID verifies exactly like one
-  captured from a DOI.
-- **The PubMed payload needed three cleanups.** Titles arrive with a trailing
-  period and sometimes markup; authors arrive as "Steffen W" rather than
-  "Steffen, W", and the first-author check depends on the latter; and
-  `pubtype` mixes publication kinds with study design — the real record reads
-  `["Comparative Study", "Journal Article", …]` — so the document type is
-  picked from a whitelist of publication kinds instead of the first entry.
-- **The identifiers are stored with the reference.** They are optional fields
-  on `StoredReference`, so the schema version does not change and an older
-  file simply has no such key. Identity is untouched: a capture that starts
-  from a PMID still ends up with the DOI the PubMed record carries, and
-  papers old enough to predate DOIs fall back to title and year, exactly
-  where they already were. A PMCID is never used for identity — one paper
-  can carry several PMC identifiers, the author's copy and the published one.
-- **They reach the export.** BibTeX has no standard field for them, so they
-  join the note the caveats already use; RIS has one, the accession number,
-  which already carries the arXiv id and the report number. They follow the
-  same style there, with a prefix, so the three stay apart.
-- **Old-style arXiv identifiers are recognised.** `math.GT/0309136`,
-  `cs/0112017` and `hep-th/9901001` — everything published before 2007 —
-  produced nothing, because only the `2301.00001` form was matched. They are
-  matched now, against the list of historical arXiv categories, and the
-  category path is kept as it is. A legacy id inside somebody else's URL
-  path is not mistaken for one.
-- **The panel says where the references are stored.** The capture button reads
-  "Capture references" and the folder reads "Export to", because that path is
-  the export directory, not the library — the library is the workspace's
-  `refs/refs.json`. A line above the list now says how many references this
-  capture stored and where.
-- **The edit page carries only its own header and footer.** Editing a
-  reference used to show the capture scope selector above and the export
-  controls below, neither of which has anything to do with editing. It now
-  has a header of its own and a footer with just the save and reset actions.
-- **The list scrolls on its own.** The panel is a column with a fixed header
-  and footer and a scrolling middle, so the export buttons stay reachable
-  however many references the capture brought in.
-- **The PubMed URL helpers no longer throw.** An identifier that cannot
-  resolve is a lookup that comes back empty, not an error: throwing there
-  aborted the whole verification, and with it the save, whenever a PMCID was
-  typed into the PMID box.
+### Added
+
+- **Labeled PMID/PMCID recognition.** Before 0.1.4, `PMID: 12345678` and
+  `PMCID: PMC1234567` produced no identifier, candidate, or lookup. The tagged
+  forms now each create a candidate; unlabeled 6–8 digit numbers remain ignored.
+- **PubMed as a fifth registry.** PMID uses PubMed ESummary; PMCID resolves
+  through PMC ESearch, PMC ESummary, then the returned PMID. The record supplies
+  bibliographic fields to the existing verification path.
+- **Optional identifier storage and export.** PMID and PMCID are optional
+  `StoredReference` fields; the schema version is unchanged. Identity still
+  resolves in the order DOI, arXiv id, ISBN, report number, then title and year,
+  and neither PMID nor PMCID takes part in it. BibTeX writes them in `note`;
+  RIS writes them as prefixed `AN` rows.
+- **Historical arXiv identifiers.** `math.GT/0309136`, `cs/0112017`, and
+  `hep-th/9901001` previously returned no result because only modern IDs such
+  as `2301.00001` were matched. The historical category whitelist now recognizes
+  these forms, preserves their category paths, and avoids matches inside
+  unrelated URLs.
+
+### Changed
+
+- **PubMed metadata normalization.** Titles may contain markup or a trailing
+  period; markup is removed, whitespace collapsed, and the final period trimmed.
+  `Steffen W` is normalized to `Steffen, W` for first-author matching, and the
+  year is parsed from `pubdate`. Since `pubtype` mixes publication kinds with
+  study designs (for example, `["Comparative Study", "Journal Article", …]`),
+  the document type is selected from a publication-kind whitelist rather than
+  the first value.
+- **Capture-panel wording and layout.** The capture button reads “Capture
+  references”; “Export to” names the export directory, not the library at
+  `refs/refs.json`. The panel reports how many references were stored. The edit
+  page has its own header and save/reset footer, while the list scrolls
+  independently so export controls remain reachable.
+
+### Fixed
+
+- **Unresolvable PubMed IDs no longer abort saving.** Previously, entering a
+  PMCID in the PMID box could make a URL helper throw and abort verification
+  and save. An unresolved identifier now returns an empty lookup instead.
 
 Tests: 30 files / 390 tests.
 
 ### 中文
 
-对话里一个裸写的 PMID 或 PMCID，现在能被识别、拿到 PubMed 核验、随文献一起存下、
-在面板里显示、并且写进导出文件。面板也会说清文献存到了哪里，编辑页不再把捕获与
-导出的控件一起带过来。
+相较于 v0.1.3，本版本新增带标签的 PMID/PMCID 识别与 PubMed 核验，恢复旧式 arXiv 编号支持，并明确区分捕获文献的存储位置与文件导出目录。
 
-- **PubMed 标识符能被识别。** `PMID: 12345678` 与 `PMCID: PMC1234567` 以前什么
-  都产生不了：没有标识符、没有候选、没有查询。现在两种都能识别，用的是人们实际
-  会写的带标签写法，其中任意一个就够建出一个候选。
-- **PubMed 是第五个注册表。** PMID 走 esummary 取；PMCID 先用 esearch 在 PMC 库里
-  解析，再经 PMC summary 自带的 PMID 交叉引用拿到 PMID。记录提供的字段与其他注册表
-  一致，所以从 PMID 捕获的文献与从 DOI 捕获的文献走的是同一条核验路径。
-- **PubMed 的数据要清洗三处。** 标题带尾部句点、有时还带标记；作者是
-  "Steffen W" 而不是 "Steffen, W"，首作者匹配依赖后者；而 `pubtype` 混着出版类型
-  与研究设计 —— 真实记录是 `["Comparative Study", "Journal Article", …]` ——
-  所以文献类型要按出版类型白名单去挑，不能取第一项。
-- **标识符随文献一起存。** 它们是 `StoredReference` 上的可选字段，schema 版本不变，
-  旧文件里压根没有这个键。身份判定完全不动：从 PMID 开始的捕获，最后拿到的仍是
-  PubMed 记录里的那个 DOI；早到没有 DOI 的老文章仍旧退回题名加年份，跟原来一样。
-  PMCID 绝不用于身份判定 —— 同一篇文献可能有多个 PMC 编号（作者稿与正式版）。
-- **标识符进得了导出。** BibTeX 没有标准字段，于是并进 caveats 已经在用的那个
-  note；RIS 有，就是访问号，而访问号里已经放着 arXiv 编号与报告号。那里沿用同样的
-  写法、加前缀，三者不会混在一起。
-- **旧式 arXiv 编号能被识别。** `math.GT/0309136`、`cs/0112017`、
-  `hep-th/9901001` —— 2007 年以前的东西 —— 以前完全识别不了，因为只匹配
-  `2301.00001` 那种形式。现在按 arXiv 的历史类别名单匹配，类别路径原样保留。
-  别人 URL 路径里的旧式编号不会被误当成编号。
-- **面板说清文献存到了哪里。** 按钮改成「捕获文献」，那个路径改成「导出到」——
-  它是导出目录，不是文献库，文献库在工作区的 `refs/refs.json`。列表上方现在有一行
-  说明这次捕获存了多少条、存到了哪里。
-- **编辑页只留自己的头与尾。** 编辑文献时以前上方挂着捕获范围选择器、下方挂着导出
-  控件，两者都与编辑无关。现在它有自己的头部，底部只有保存与还原。
-- **列表自己会滚。** 面板变成固定头尾、中间滚动的一列，无论这次捕获带进来多少条
-  文献，导出按钮都一直够得着。
-- **PubMed 的 URL 构造器不再抛错。** 解析不了的标识符应该是「查了没有」，而不是错误：
-  在那里抛错会中断整次核验，连带把保存也打断 —— 只要有人在 PMID 框里填进 PMCID
-  就会发生。
+### 新增
+
+- **识别带标签的 PMID/PMCID。** 0.1.4 以前，`PMID: 12345678` 和
+  `PMCID: PMC1234567` 都无法生成标识符、候选或查询。现在两种带标签的写法都能识别，
+  其中任意一个就足以生成候选；没有标签的 6–8 位数字仍会忽略。
+- **将 PubMed 纳入第五个注册表。** PMID 通过 PubMed ESummary 查询；PMCID 依次经过
+  PMC ESearch、PMC ESummary，再用返回的 PMID 查询 PubMed。记录提供书目字段，并进入
+  现有核验流程。
+- **可选存储并导出标识符。** PMID 和 PMCID 是 `StoredReference` 上的可选字段，schema
+  版本不变。身份仍依次由 DOI、arXiv 编号、ISBN、报告号、题名+年份判定，PMID 与 PMCID
+  都不参与。BibTeX 将它们写入 `note`；RIS 将它们写成带前缀的 `AN` 行。
+- **识别旧式 arXiv 编号。** `math.GT/0309136`、`cs/0112017` 和 `hep-th/9901001`
+  以前无法识别，因为只匹配 `2301.00001` 等新式编号。现在按历史类别白名单识别并保留
+  类别路径，也不会把其他 URL 中看似旧式的编号误当成标识符。
+
+### 变更
+
+- **规范化 PubMed 元数据。** 标题可能含标记或尾部句点；现在会去除标记、合并空白并
+  删除末尾句点。作者 `Steffen W` 会规范为首作者匹配所需的 `Steffen, W`，年份从
+  `pubdate` 解析。由于 `pubtype` 混有出版物类型和研究设计（例如
+  `["Comparative Study", "Journal Article", …]`），文献类型改为从出版物类型白名单中
+  选择，而不再取第一项。
+- **调整捕获面板文案与布局。** 捕获按钮显示为“捕获文献”；“导出到”指向导出目录，不是
+  工作区的 `refs/refs.json` 文献库。面板会显示成功存储的文献数量。编辑页有独立的标题栏
+  和保存/还原底栏；文献列表独立滚动，导出控件始终可用。
+
+### 修复
+
+- **无法解析的 PubMed 标识符不再中断保存。** 以前在 PMID 输入框中填写 PMCID 可能让
+  URL 构造器抛错，进而中断核验和保存。现在无法解析的标识符会返回空查询结果。
 
 测试：30 个文件 / 390 项。
 

@@ -4,19 +4,35 @@
 
 ![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg) [![npm](https://img.shields.io/npm/v/dsh-refkeeper.svg)](https://www.npmjs.com/package/dsh-refkeeper) [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 
-A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) plugin. It reads a conversation, collects the papers that conversation cited, checks each paper against Crossref, OpenAlex, arXiv, DataCite and PubMed, and exports the confirmed entries as BibTeX or RIS. Papers that fail the check go into a separate quarantine file instead of the library.
+Long research conversations scatter citations across turns, tool results and summaries. dsh-refkeeper extracts references from the conversation you choose, checks their metadata against five scholarly registries, and turns them into traceable entries with annotations and BibTeX/RIS export. A registry disagreement is kept in quarantine instead of being treated as verified.
 
 ![The capture panel in the top-right corner](docs/images/panel-en.png)
 
 If this plugin saves you time, a star on GitHub helps other people find it. If you hit a bug or want a feature, open an issue — Chinese or English, either is fine. I read all of them and add the useful ones to the roadmap.
 
+## Contents
+
+[Features](#what-it-does) · [Supported identifiers](#supported-identifiers) · [Why this matters](#why-not-just-copy-the-citations-by-hand) · [Install](#install) · [Use](#use) · [Output](#what-the-output-looks-like) · [Verification](#how-a-paper-is-accepted-or-rejected) · [Privacy](#data-and-privacy) · [Development](#development) · [Changelog](#changelog) · [License](#license)
+
 ## What it does
 
-- **Collects citations.** Scope can be one turn, the last N turns, or the whole session. It recognises DOIs, arXiv ids, PMIDs, PMCIDs, ISBNs and report numbers, and also reference lines written in APA, GB/T 7714 or IEEE style. Legacy arXiv identifiers from before 2007 — `math.GT/0309136`, `cs/0112017` — are recognised too.
+- **Collects citations.** Scope can be one turn, the last N turns, or the whole session. It recognises DOIs, arXiv ids, PMIDs, PMCIDs, ISBNs and report numbers, and also reference lines written in APA, GB/T 7714 or IEEE style. Supported historical arXiv category IDs — for example, `math.GT/0309136` and `cs/0112017` — are recognised too.
 - **Checks them against registries.** An entry is accepted only if the title matches, the year is within one year, the first author matches, and at least one registry returned a record. There are five registries: Crossref, OpenAlex, arXiv, DataCite and PubMed.
 - **Writes annotations.** After a capture, the model already running the session writes four short fields per entry: a summary, why the paper is relevant here, a supporting quote, and caveats. A quote that does not appear in the conversation is dropped.
 - **Exports.** BibTeX, RIS, or both. The export can cover the last capture, the entries you ticked, or the whole library. PMIDs and PMCIDs go into the export as well.
 - **Says where the references are stored.** After a capture the panel tells you how many references it stored and that they live in the workspace's `refs/refs.json`. The folder below is where the `.bib` and `.ris` files are written, not where the library is.
+
+## Supported identifiers
+
+| Identifier | Accepted examples |
+| --- | --- |
+| DOI | `10.1002/joc.1688`; `https://doi.org/10.1002/joc.1688` |
+| arXiv | `2401.01234`, `arXiv:2401.01234v2`, `https://arxiv.org/abs/2401.01234v2`; legacy `math.GT/0309136`, `arXiv:math.GT/0309136v2` |
+| PubMed | `PMID: 12345678`; `PMCID: PMC1234567` |
+| ISBN | ISBN-10 `0-306-40615-2`; ISBN-13 `978-0-306-40615-7` |
+| Report number | `NUREG-1234` |
+
+PMID and PMCID must include their labels. An unlabeled 6–8 digit number such as `20240101` is ignored, so dates and sample IDs are not mistaken for papers. A PMCID is resolved through PMC before the PubMed lookup.
 
 ## One button in the composer
 
@@ -45,6 +61,10 @@ Asking the model for a `.bib` file is faster, but models make up page ranges, DO
 In DSH open **Settings → Plugins → Add plugin** and enter `dsh-refkeeper`. The package is published on npm, so this is one step and runs no build: the tarball ships the built `lib/`. Enable it for the current profile, then reload.
 
 To track the repository instead of the published version, paste the Git address `https://github.com/ymwang92/dsh-refkeeper` into the same dialog. The repository commits `lib/` too, so that route needs no build either.
+
+### Configuration
+
+No plugin-specific API key or registry configuration is required. Annotations use the model selected for the current session. The panel's **Export to** path is stored in `refs/settings.json` and must stay inside the session workspace; the library remains at `refs/refs.json`.
 
 ## Use
 
@@ -101,10 +121,11 @@ If the citation in the conversation lacked volume, issue, pages, publisher or la
 
 ```text
 conversation text
-   │  identifiers: DOI, arXiv id, ISBN, report number
+   │  identifiers: DOI, arXiv id, labeled PMID/PMCID, ISBN, report number
    │  reference lines: APA, GB/T 7714, IEEE
    ▼
-candidates ──► Crossref, OpenAlex, arXiv, DataCite, PubMed (queried in parallel)
+candidates ──► Crossref, OpenAlex, arXiv, DataCite, PubMed
+                 (concurrent where possible; PMCID uses a PMC crosswalk)
    │
    ├─ accepted when: title matches · year within ±1 · first author matches
    │                 and at least one registry returned a record

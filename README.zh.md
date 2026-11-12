@@ -4,19 +4,35 @@
 
 ![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg) [![npm](https://img.shields.io/npm/v/dsh-refkeeper.svg)](https://www.npmjs.com/package/dsh-refkeeper) [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 插件。它读取一段对话，把对话里引用过的文献收集起来，逐条到 Crossref、OpenAlex、arXiv、DataCite、PubMed 核对，通过核对的条目导出为 BibTeX 或 RIS。没通过的放进单独的隔离文件，不进主库。
+长篇研究对话中的引文常散落在不同轮次、工具结果和摘要里。dsh-refkeeper 会从你选定的对话中提取引用，用五个学术注册表核对元数据，再整理为可追溯的文献条目并支持注解及 BibTeX/RIS 导出。注册表明确不一致的条目会留在隔离区，不会被当成已核实文献。
 
 ![右上角的捕获面板](docs/images/panel.png)
 
 如果这个插件帮你省了时间，欢迎在 GitHub 上点个 Star，它能帮其他人找到这个插件。遇到 Bug 或想加功能，直接开 Issue 就行，中文英文都可以。每条都会看，有价值的会排进 Roadmap。
 
+## 目录
+
+[功能](#功能) · [支持的标识符](#支持的标识符) · [为什么不自己复制](#为什么不自己复制) · [安装](#安装) · [使用](#使用) · [输出示例](#输出示例) · [判定规则](#判定规则) · [数据与隐私](#数据与隐私) · [开发](#开发) · [更新记录](#更新记录) · [许可证](#许可证)
+
 ## 功能
 
-- **收集引用**。范围可以是本轮、前 N 轮或整个对话。识别 DOI、arXiv 编号、PMID、PMCID、ISBN、报告号，也识别按 APA、GB/T 7714、IEEE 格式写出的参考文献行。2007 年以前的旧式 arXiv 编号（`math.GT/0309136`、`cs/0112017`）同样认得。
+- **收集引用**。范围可以是本轮、前 N 轮或整个对话。识别 DOI、arXiv 编号、PMID、PMCID、ISBN、报告号，也识别按 APA、GB/T 7714、IEEE 格式写出的参考文献行。部分历史 arXiv 分类编号（如 `math.GT/0309136`、`cs/0112017`）同样支持。
 - **对照注册表核对**。只有标题匹配、年份相差不超过一年、第一作者匹配，并且至少有一个注册表返回了记录，条目才会被接受。注册表有五个：Crossref、OpenAlex、arXiv、DataCite，加上 PubMed。
 - **生成注解**。捕获后，由当前会话使用的模型为每条写四个字段：摘要、与本书稿的关系、一段原文引证、注意事项。引证如果没在对话里逐字出现，会被丢弃。
 - **导出**。BibTeX、RIS 或两者。导出范围可以是最近一次捕获、你勾选的条目，或整个文献库。PMID 与 PMCID 会一起写进去。
 - **说清存到哪里**。捕获完成后，面板会告诉你这次存了多少条、存在工作区的 `refs/refs.json`；下面那个「导出到」是 `.bib`/`.ris` 的输出目录，不是文献库。
+
+## 支持的标识符
+
+| 标识符 | 格式示例 |
+| --- | --- |
+| DOI | `10.1002/joc.1688`；`https://doi.org/10.1002/joc.1688` |
+| arXiv | `2401.01234`、`arXiv:2401.01234v2`、`https://arxiv.org/abs/2401.01234v2`；旧式 `math.GT/0309136`、`arXiv:math.GT/0309136v2` |
+| PubMed | `PMID: 12345678`；`PMCID: PMC1234567` |
+| ISBN | ISBN-10 `0-306-40615-2`；ISBN-13 `978-0-306-40615-7` |
+| 报告号 | `NUREG-1234` |
+
+PMID 和 PMCID 必须带标签。没有标签的 6–8 位数字（如 `20240101`）会被忽略，避免误识别日期或样本号。PMCID 会先经 PMC 交叉解析，再查询 PubMed。
 
 ## 只有一个按钮
 
@@ -45,6 +61,10 @@
 在 DSH 打开**设置 → 插件 → 添加插件**，输入 `dsh-refkeeper`。这个包已发布到 npm，一步装好，不跑构建（tarball 里带 `lib/`）。在当前 profile 启用后重载。
 
 想跟随仓库更新而不是锁定发布版，就在同一个输入框里填 Git 地址 `https://github.com/ymwang92/dsh-refkeeper`；仓库里也提交了 `lib/`，同样不需要构建。
+
+### 配置
+
+无需单独的插件 API key 或注册表配置；注解使用当前会话所选模型。面板中的「导出到」路径保存在 `refs/settings.json`，必须位于当前会话工作区内；文献库仍固定在 `refs/refs.json`。
 
 ## 使用
 
@@ -101,10 +121,11 @@
 
 ```text
 对话文本
-   │  标识符：DOI、arXiv 编号、ISBN、报告号
+   │  标识符：DOI、arXiv 编号、带标签的 PMID/PMCID、ISBN、报告号
    │  参考文献行：APA、GB/T 7714、IEEE
    ▼
-候选条目 ──► Crossref、OpenAlex、arXiv、DataCite、PubMed（并行查询）
+候选条目 ──► Crossref、OpenAlex、arXiv、DataCite、PubMed
+                 （尽可能并发查询；PMCID 先经 PMC 交叉解析）
    │
    ├─ 接受条件：标题匹配 · 年份相差 ±1 · 第一作者匹配
    │             且至少一个注册表返回记录
