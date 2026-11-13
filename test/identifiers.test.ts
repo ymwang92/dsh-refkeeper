@@ -123,49 +123,53 @@ describe('extractIdentifiers', () => {
 
   it('preserves exact values for all existing report formats', () => {
     expect(extractIdentifiers('PB123456 NUREG-1234 WHO/AB/1234 GB/T 7714-2015 ISO 9001')).toEqual([
-      { kind: 'report', value: 'PB123456', raw: 'PB123456', host: '', confidence: 0.45 },
-      { kind: 'report', value: 'NUREG-1234', raw: 'NUREG-1234', host: '', confidence: 0.45 },
-      { kind: 'report', value: 'WHO/AB/1234', raw: 'WHO/AB/1234', host: '', confidence: 0.45 },
-      { kind: 'report', value: 'GB/T7714-2015', raw: 'GB/T 7714-2015', host: '', confidence: 0.45 },
-      { kind: 'report', value: 'ISO9001', raw: 'ISO 9001', host: '', confidence: 0.45 },
+      { kind: 'report', value: 'PB123456', raw: 'PB123456', host: '', confidence: 0.8 },
+      { kind: 'report', value: 'NUREG-1234', raw: 'NUREG-1234', host: '', confidence: 0.8 },
+      { kind: 'report', value: 'WHO/AB/1234', raw: 'WHO/AB/1234', host: '', confidence: 0.8 },
+      { kind: 'report', value: 'GB/T7714-2015', raw: 'GB/T 7714-2015', host: '', confidence: 0.4 },
+      { kind: 'report', value: 'ISO9001', raw: 'ISO 9001', host: '', confidence: 0.4 },
     ])
   })
 
   describe('additional report formats', () => {
     const positives = [
-      { input: 'RFC 8230', value: 'RFC 8230' },
-      { input: 'RFC-9110', value: 'RFC-9110' },
-      { input: 'rfc8230', value: 'rfc8230' },
-      { input: 'DOE/BR-123456', value: 'DOE/BR-123456' },
-      { input: 'DOE/BR123456', value: 'DOE/BR123456' },
-      { input: 'doe/er-0313', value: 'doe/er-0313' },
-      { input: 'NASA/TM-2020-12345', value: 'NASA/TM-2020-12345' },
-      { input: 'NASA/CP-123456', value: 'NASA/CP-123456' },
-      { input: 'nasa/cp123456', value: 'nasa/cp123456' },
-      { input: 'NTRS123456', value: 'NTRS123456' },
-      { input: 'NTRS 123456', value: 'NTRS 123456' },
-      { input: 'ntrs-1234567', value: 'ntrs-1234567' },
-      { input: 'NACA 1234', value: 'NACA 1234' },
-      { input: 'NACA-1234', value: 'NACA-1234' },
-      { input: 'naca123456', value: 'naca123456' },
-      { input: 'AD-A123456', value: 'AD-A123456' },
-      { input: 'ADA123456', value: 'ADA123456' },
-      { input: 'ad-a9876543', value: 'ad-a9876543' },
-      { input: 'EPA-600-R-123', value: 'EPA-600-R-123' },
-      { input: 'EPA-600/R-14/001', value: 'EPA-600/R-14/001' },
-      { input: 'epa-123/x-99/456', value: 'epa-123/x-99/456' },
+      { input: 'RFC-9110', value: 'RFC-9110', confidence: 0.4 },
+      { input: 'DOE/BR-123456', value: 'DOE/BR-123456', confidence: 0.8 },
+      { input: 'DOE/BR123456', value: 'DOE/BR123456', confidence: 0.8 },
+      { input: 'doe/er-0313', value: 'DOE/ER-0313', confidence: 0.8 },
+      { input: 'NASA/TM-2020-12345', value: 'NASA/TM-2020-12345', confidence: 0.8 },
+      { input: 'NASA/CP-123456', value: 'NASA/CP-123456', confidence: 0.8 },
+      { input: 'nasa/cp123456', value: 'NASA/CP123456', confidence: 0.8 },
+      { input: 'NTRS123456', value: 'NTRS123456', confidence: 0.8 },
+      { input: 'NTRS 123456', value: 'NTRS123456', confidence: 0.8 },
+      { input: 'ntrs-1234567', value: 'NTRS-1234567', confidence: 0.8 },
+      { input: 'NACA 1234', value: 'NACA1234', confidence: 0.8 },
+      { input: 'NACA-1234', value: 'NACA-1234', confidence: 0.8 },
+      { input: 'naca123456', value: 'NACA123456', confidence: 0.8 },
+      { input: 'AD-A123456', value: 'AD-A123456', confidence: 0.8 },
+      { input: 'ADA123456', value: 'ADA123456', confidence: 0.8 },
+      { input: 'ad-a9876543', value: 'AD-A9876543', confidence: 0.8 },
+      { input: 'EPA-600-R-123', value: 'EPA-600-R-123', confidence: 0.8 },
+      { input: 'EPA-600/R-14/001', value: 'EPA-600/R-14/001', confidence: 0.8 },
+      { input: 'epa-123/x-99/456', value: 'EPA-123/X-99/456', confidence: 0.8 },
     ] as const
 
-    for (const { input, value } of positives) {
-      it(`recognises ${input} with the original spelling`, () => {
+    for (const { input, value, confidence } of positives) {
+      it(`recognises ${input} with its canonical value`, () => {
         expect(extractIdentifiers(input)).toEqual([
-          { kind: 'report', value, raw: input, host: '', confidence: 0.45 },
+          { kind: 'report', value, raw: input, host: '', confidence },
         ])
       })
     }
 
+    it('canonicalizes equivalent report spellings', () => {
+      expect(extractIdentifiers('NTRS 123456')[0]?.value).toBe('NTRS123456')
+      expect(extractIdentifiers('ntrs123456')[0]?.value).toBe('NTRS123456')
+      expect(extractIdentifiers('nasa/tm-2020-12345')[0]?.value).toBe('NASA/TM-2020-12345')
+    })
+
     const malformed = [
-      { format: 'RFC', inputs: ['RFC', 'RFC 123456', 'RFC-X 1234'] },
+      { format: 'RFC', inputs: ['RFC', 'RFC 123456', 'RFC 8230', 'rfc8230', 'RFC-X 1234', 'RFC 1918', 'RFC 2616', 'RFC 5322', 'RFC 2119'] },
       { format: 'DOE', inputs: ['DOE/BR-12', 'DOE/B-123456', 'DOE BR-123456'] },
       { format: 'NASA', inputs: ['NASA/TM-12', 'NASA/T-123456', 'NASA TM-123456'] },
       { format: 'NTRS', inputs: ['NTRS12345', 'NTRS 12345', 'NTRS-12345X'] },
@@ -194,10 +198,10 @@ describe('extractIdentifiers', () => {
     })
 
     it('keeps report matches in source order', () => {
-      expect(extractIdentifiers('NACA-1234; NUREG-1234; RFC 8230')).toEqual([
-        { kind: 'report', value: 'NACA-1234', raw: 'NACA-1234', host: '', confidence: 0.45 },
-        { kind: 'report', value: 'NUREG-1234', raw: 'NUREG-1234', host: '', confidence: 0.45 },
-        { kind: 'report', value: 'RFC 8230', raw: 'RFC 8230', host: '', confidence: 0.45 },
+      expect(extractIdentifiers('NACA-1234; NUREG-1234; RFC-9110')).toEqual([
+        { kind: 'report', value: 'NACA-1234', raw: 'NACA-1234', host: '', confidence: 0.8 },
+        { kind: 'report', value: 'NUREG-1234', raw: 'NUREG-1234', host: '', confidence: 0.8 },
+        { kind: 'report', value: 'RFC-9110', raw: 'RFC-9110', host: '', confidence: 0.4 },
       ])
     })
   })

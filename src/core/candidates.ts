@@ -423,6 +423,7 @@ export function extractCandidates(
       // Bare URLs are leads, not references: only a DOI/arXiv/ISBN/report
       // number is strong enough to create a candidate on its own.
       if (identifier.kind === 'url' && identifier.confidence < 0.7) continue
+      if (identifier.kind === 'report' && identifier.confidence < 0.5) continue
       absorb(candidateFromIdentifier(identifier, source.seq))
     }
   }

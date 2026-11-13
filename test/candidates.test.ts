@@ -123,6 +123,26 @@ describe('mergeCandidates', () => {
   })
 })
 
+describe('report candidate confidence', () => {
+  it('keeps high-confidence report IDs and filters bare standards', () => {
+    const reports = extractCandidates([{
+      seq: 1,
+      text: 'PB123456; NUREG-1234; WHO/AB/1234; DOE/BR-123456; NASA/TM-2020-12345; NTRS 123456; NACA 1234; AD-A123456; EPA-600-R-123',
+    }])
+    expect(reports.map((candidate) => candidate.reportNumber).sort()).toEqual([
+      'AD-A123456', 'DOE/BR-123456', 'EPA-600-R-123', 'NACA1234',
+      'NASA/TM-2020-12345', 'NTRS123456', 'NUREG-1234', 'PB123456', 'WHO/AB/1234',
+    ])
+    expect(reports.every((candidate) => candidate.confidence === 0.8)).toBe(true)
+
+    const standards = extractCandidates([{
+      seq: 2,
+      text: 'GB/T 12345; ISO 8601; ISO 9001; RFC-9110',
+    }])
+    expect(standards).toEqual([])
+  })
+})
+
 describe('rankCandidates', () => {
   it('orders by confidence, then article type, then title', () => {
     const low = candidateFromModel({ title: 'B study', doi: '10.1/b', year: 2020, authors: ['B'] })

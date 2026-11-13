@@ -108,7 +108,7 @@ const ISBN10 = /\bISBN(?:-1[03])?\s*[:：]?\s*(\d[\d\-\s]{7,12}[\dXx])\b/giu
 const REPORT = /\b(PB\d{6,}|NUREG-\d{3,}|WHO\/[A-Z]{2,}\/\d{1,4}|GB\/T\s?\d{1,6}(?:[-.]\d{1,4})?|ISO\s?\d{1,6}(?:[-:]\d{1,4})?)\b/gu
 /** New report families are case-insensitive but retain the matched spelling. */
 const ADDITIONAL_REPORT =
-  /\b(?:RFC[ -]?\d{1,5}|DOE\/[A-Z]{2,}-?\d{3,}|NASA\/[A-Z]{2,}-?\d{3,}(?:-\d{3,})?|NTRS[ -]?\d{6,}|NACA[ -]?\d{4,6}|AD-?A\d{6,}|EPA-?\d{3}-[A-Z]-\d{3}|EPA-?\d{3}\/[A-Z]-\d{2}\/\d{3})\b/giu
+  /\b(?:RFC-\d{1,5}|DOE\/[A-Z]{2,}-?\d{3,}|NASA\/[A-Z]{2,}-?\d{3,}(?:-\d{3,})?|NTRS[ -]?\d{6,}|NACA[ -]?\d{4,6}|AD-?A\d{6,}|EPA-?\d{3}-[A-Z]-\d{3}|EPA-?\d{3}\/[A-Z]-\d{2}\/\d{3})\b/giu
 const URL_PATTERN = /\bhttps?:\/\/[^\s"'”）】\]]+/giu
 
 /** Bare-DOI normal form: lowercase (DOIs are case-insensitive) and trimmed. */
@@ -284,11 +284,13 @@ export function extractIdentifiers(text: string): IdentifierHit[] {
       index: match.index ?? -1,
       value: collapseReport(match[1] ?? ''),
       raw: match[0],
+      confidence: confidenceForReport(match[0]),
     })),
     ...Array.from(text.matchAll(ADDITIONAL_REPORT), (match) => ({
       index: match.index ?? -1,
-      value: match[0],
+      value: collapseReport(match[0]),
       raw: match[0],
+      confidence: confidenceForReport(match[0]),
     })),
   ].sort((left, right) => left.index - right.index)
 
@@ -298,12 +300,15 @@ export function extractIdentifiers(text: string): IdentifierHit[] {
       value: match.value,
       raw: match.raw,
       host: '',
-      // A bare standard number ("ISO 9001") is usually not a citation.
-      confidence: 0.45,
+      confidence: match.confidence,
     })
   }
 
   return hits
+}
+
+function confidenceForReport(raw: string): number {
+  return /^(?:GB\/T|ISO|RFC-)/iu.test(raw) ? 0.4 : 0.8
 }
 
 /** Report numbers vary by spacing/case; comparing a compact form avoids misses. */
