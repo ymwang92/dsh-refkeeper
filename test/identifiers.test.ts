@@ -121,6 +121,87 @@ describe('extractIdentifiers', () => {
     expect(kinds('NUREG-1234 and GB/T 7714-2015')).toEqual(['report:NUREG-1234', 'report:GB/T7714-2015'])
   })
 
+  it('preserves exact values for all existing report formats', () => {
+    expect(extractIdentifiers('PB123456 NUREG-1234 WHO/AB/1234 GB/T 7714-2015 ISO 9001')).toEqual([
+      { kind: 'report', value: 'PB123456', raw: 'PB123456', host: '', confidence: 0.45 },
+      { kind: 'report', value: 'NUREG-1234', raw: 'NUREG-1234', host: '', confidence: 0.45 },
+      { kind: 'report', value: 'WHO/AB/1234', raw: 'WHO/AB/1234', host: '', confidence: 0.45 },
+      { kind: 'report', value: 'GB/T7714-2015', raw: 'GB/T 7714-2015', host: '', confidence: 0.45 },
+      { kind: 'report', value: 'ISO9001', raw: 'ISO 9001', host: '', confidence: 0.45 },
+    ])
+  })
+
+  describe('additional report formats', () => {
+    const positives = [
+      { input: 'RFC 8230', value: 'RFC 8230' },
+      { input: 'RFC-9110', value: 'RFC-9110' },
+      { input: 'rfc8230', value: 'rfc8230' },
+      { input: 'DOE/BR-123456', value: 'DOE/BR-123456' },
+      { input: 'DOE/BR123456', value: 'DOE/BR123456' },
+      { input: 'doe/er-0313', value: 'doe/er-0313' },
+      { input: 'NASA/TM-2020-12345', value: 'NASA/TM-2020-12345' },
+      { input: 'NASA/CP-123456', value: 'NASA/CP-123456' },
+      { input: 'nasa/cp123456', value: 'nasa/cp123456' },
+      { input: 'NTRS123456', value: 'NTRS123456' },
+      { input: 'NTRS 123456', value: 'NTRS 123456' },
+      { input: 'ntrs-1234567', value: 'ntrs-1234567' },
+      { input: 'NACA 1234', value: 'NACA 1234' },
+      { input: 'NACA-1234', value: 'NACA-1234' },
+      { input: 'naca123456', value: 'naca123456' },
+      { input: 'AD-A123456', value: 'AD-A123456' },
+      { input: 'ADA123456', value: 'ADA123456' },
+      { input: 'ad-a9876543', value: 'ad-a9876543' },
+      { input: 'EPA-600-R-123', value: 'EPA-600-R-123' },
+      { input: 'EPA-600/R-14/001', value: 'EPA-600/R-14/001' },
+      { input: 'epa-123/x-99/456', value: 'epa-123/x-99/456' },
+    ] as const
+
+    for (const { input, value } of positives) {
+      it(`recognises ${input} with the original spelling`, () => {
+        expect(extractIdentifiers(input)).toEqual([
+          { kind: 'report', value, raw: input, host: '', confidence: 0.45 },
+        ])
+      })
+    }
+
+    const malformed = [
+      { format: 'RFC', inputs: ['RFC', 'RFC 123456', 'RFC-X 1234'] },
+      { format: 'DOE', inputs: ['DOE/BR-12', 'DOE/B-123456', 'DOE BR-123456'] },
+      { format: 'NASA', inputs: ['NASA/TM-12', 'NASA/T-123456', 'NASA TM-123456'] },
+      { format: 'NTRS', inputs: ['NTRS12345', 'NTRS 12345', 'NTRS-12345X'] },
+      { format: 'NACA', inputs: ['NACA123', 'NACA 1234567', 'NACA-ABC'] },
+      { format: 'AD-A', inputs: ['AD-A12345', 'ADA12345', 'AD-A123456X'] },
+      { format: 'EPA', inputs: ['EPA-60-R-123', 'EPA-600/R-14', 'EPA-600/R-014/001'] },
+    ] as const
+
+    for (const { format, inputs } of malformed) {
+      it(`rejects malformed ${format} identifiers`, () => {
+        for (const input of inputs) expect(extractIdentifiers(input)).toEqual([])
+      })
+    }
+
+    it('does not mistake prose for report identifiers', () => {
+      const negatives = [
+        'we follow the RFC',
+        'NASA announced a new rover',
+        'the ISO standard',
+        'DOE and NASA released it',
+        'NTRS has a searchable archive',
+        'a NACA report from 1935',
+        'EPA publishes guidance documents',
+      ]
+      for (const input of negatives) expect(extractIdentifiers(input)).toEqual([])
+    })
+
+    it('keeps report matches in source order', () => {
+      expect(extractIdentifiers('NACA-1234; NUREG-1234; RFC 8230')).toEqual([
+        { kind: 'report', value: 'NACA-1234', raw: 'NACA-1234', host: '', confidence: 0.45 },
+        { kind: 'report', value: 'NUREG-1234', raw: 'NUREG-1234', host: '', confidence: 0.45 },
+        { kind: 'report', value: 'RFC 8230', raw: 'RFC 8230', host: '', confidence: 0.45 },
+      ])
+    })
+  })
+
   it('keeps a strong-host URL but does not dedupe it against a DOI', () => {
     const hits = extractIdentifiers('https://www.nature.com/articles/s41586-024-00001-x')
     expect(hits).toHaveLength(1)
