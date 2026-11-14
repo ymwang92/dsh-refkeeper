@@ -12,11 +12,11 @@ If this plugin saves you time, a star on GitHub helps other people find it. If y
 
 ## Contents
 
-[Features](#what-it-does) · [Supported identifiers](#supported-identifiers) · [Why this matters](#why-not-just-copy-the-citations-by-hand) · [Install](#install) · [Use](#use) · [Output](#what-the-output-looks-like) · [Verification](#how-a-paper-is-accepted-or-rejected) · [Privacy](#data-and-privacy) · [Development](#development) · [Changelog](#changelog) · [License](#license)
+[Features](#what-it-does) · [Supported identifiers](#supported-identifiers) · [Supported reference formats](#supported-reference-formats) · [Why this matters](#why-not-just-copy-the-citations-by-hand) · [Install](#install) · [Use](#use) · [Output](#what-the-output-looks-like) · [Verification](#how-a-paper-is-accepted-or-rejected) · [Privacy](#data-and-privacy) · [Development](#development) · [Changelog](#changelog) · [License](#license)
 
 ## What it does
 
-- **Collects citations.** Scope can be one turn, the last N turns, or the whole session. It recognises DOIs, arXiv ids, PMIDs, PMCIDs, ISBNs and report numbers, and also reference lines written in APA, GB/T 7714 or IEEE style. Supported historical arXiv category IDs — for example, `math.GT/0309136` and `cs/0112017` — are recognised too.
+- **Collects citations.** Scope can be one turn, the last N turns, or the whole session. It recognises DOIs, arXiv ids, PMIDs, PMCIDs, ISBNs and report numbers, and also reference lines written in APA, GB/T 7714, IEEE, BibTeX or Vancouver style. Supported historical arXiv category IDs — for example, `math.GT/0309136` and `cs/0112017` — are recognised too.
 - **Checks them against registries.** An entry is accepted only if the title matches, the year is within one year, the first author matches, and at least one registry returned a record. There are five registries: Crossref, OpenAlex, arXiv, DataCite and PubMed.
 - **Writes annotations.** After a capture, the model already running the session writes four short fields per entry: a summary, why the paper is relevant here, a supporting quote, and caveats. A quote that does not appear in the conversation is dropped.
 - **Exports.** BibTeX, RIS, or both. The export can cover the last capture, the entries you ticked, or the whole library. PMIDs and PMCIDs go into the export as well.
@@ -28,11 +28,35 @@ If this plugin saves you time, a star on GitHub helps other people find it. If y
 | --- | --- |
 | DOI | `10.1002/joc.1688`; `https://doi.org/10.1002/joc.1688` |
 | arXiv | `2401.01234`, `arXiv:2401.01234v2`, `https://arxiv.org/abs/2401.01234v2`; legacy `math.GT/0309136`, `arXiv:math.GT/0309136v2` |
+| Link carrying an identifier | `https://arxiv.org/format/2401.01234`, `https://doi.org/10.1002/joc.1688`, `https://www.biorxiv.org/content/10.1101/2020.01.01.123456` |
 | PubMed | `PMID: 12345678`; `PMCID: PMC1234567` |
 | ISBN | ISBN-10 `0-306-40615-2`; ISBN-13 `978-0-306-40615-7` |
-| Report number | `NUREG-1234` |
+| Report number | `NUREG-1234`; `PB123456`; `NACA 1234`; `NTRS 123456`; `AD-A123456`; `DOE/BR-123456`; `NASA/TM-2020-12345`; `EPA-600/R-14/001`; `RFC-9110` |
 
 PMID and PMCID must include their labels. An unlabeled 6–8 digit number such as `20240101` is ignored, so dates and sample IDs are not mistaken for papers. A PMCID is resolved through PMC before the PubMed lookup.
+
+## Supported reference formats
+
+A reference pasted as a line rather than as an identifier is parsed too.
+
+| Format | Example |
+| --- | --- |
+| APA | `Smith, J. (2020). A study of something. Journal of Testing, 12(3), 45-67.` |
+| GB/T 7714 | `张三, 李四. 一种标题很长的中文文献标题测试用例[J]. 某某学报, 2020, 12(3): 45-67.` |
+| IEEE | `[1] A. Smith, "A titled paper," Journal of Testing, vol. 12, no. 3, pp. 45-67, 2020.` |
+| BibTeX | `@article{key, title = {A Study}, author = {Smith, John}, year = {2020}, doi = {10.1000/x}}` |
+| Vancouver | `1. Smith J, Doe A. A study of something. Journal of Testing. 2020;12(3):45-67.` |
+
+A BibTeX entry can be pasted in bulk: several blocks in one message are read as
+several references. `@string` macros are expanded and nested braces are
+balanced, so `title = {A {DNA}-based method}` arrives as one title, and an
+entry without a title is skipped rather than stored empty.
+
+A standard number is not a reference. `ISO 9001`, `GB/T 12345` and `RFC 1918`
+are read as text but never become entries, because a research conversation
+mentions them far more often than it cites them. A report number that really
+is a report — `NACA 1234`, `NTRS 123456`, `DOE/BR-123456`, `NASA/TM-2020-12345`,
+`RFC-9110` — does become one.
 
 ## One button in the composer
 
@@ -122,7 +146,7 @@ If the citation in the conversation lacked volume, issue, pages, publisher or la
 ```text
 conversation text
    │  identifiers: DOI, arXiv id, labeled PMID/PMCID, ISBN, report number
-   │  reference lines: APA, GB/T 7714, IEEE
+   │  reference lines: APA, GB/T 7714, IEEE, BibTeX, Vancouver
    ▼
 candidates ──► Crossref, OpenAlex, arXiv, DataCite, PubMed
                  (concurrent where possible; PMCID uses a PMC crosswalk)
@@ -143,7 +167,7 @@ The model call happens once per capture, with a 60 second cap, and covers at mos
 
 ## Chinese references
 
-GB/T 7714 reference lines are parsed along with APA and IEEE. Chinese titles are matched against registry records by character bigrams (Dice ≥ 0.90) rather than word tokens, because romanised records otherwise never match. `language` is carried into both export formats.
+GB/T 7714 reference lines are parsed along with APA, IEEE, BibTeX and Vancouver. Chinese titles are matched against registry records by character bigrams (Dice ≥ 0.90) rather than word tokens, because romanised records otherwise never match. `language` is carried into both export formats.
 
 Registry coverage for Chinese journals is thin: CNKI, Wanfang and CQVIP links are only used to extract identifiers, not queried as registries. Expect more manual correction there than for a paper with an English DOI.
 

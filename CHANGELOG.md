@@ -1,5 +1,97 @@
 # Changelog
 
+## 0.1.5 — 2026-11-14
+
+A link that carries an identifier now yields a reference, a pasted BibTeX
+entry is read as a reference, and the report numbers that technical
+documents use are recognised — while the standard numbers that technical
+documents also use are not.
+
+### Added
+
+- **Identifiers inside links.** `arxiv.org/abs/…`, `arxiv.org/pdf/…`,
+  `arxiv.org/format/…`, `doi.org/…`, `dx.doi.org/…`, bioRxiv and medRxiv
+  links already resolved; a link whose identifier was recognised now also
+  produces a candidate that the registries can be asked about, so pasting a
+  bare arXiv link captures the paper instead of nothing.
+- **BibTeX entries.** A pasted `@article{…}` block is read as a reference:
+  the `@type` maps to the entry type, `title`, `author`, `year`, `journal` or
+  `booktitle`, `volume`, `number`, `pages` and `doi` are taken, `@string`
+  macros are expanded, nested braces are balanced, and both `Last, First` and
+  `First Last` authors become the same shape. Several blocks in one message
+  are read as several references. An entry without a title is skipped rather
+  than stored empty.
+- **Vancouver reference lines.** The numbered style used in medicine —
+  `1. Smith J, Doe A. Title. Journal. 2020;12(3):45-67.` — is parsed, with
+  the surname-plus-initials author form turned into the same `Last, Initials`
+  shape the other styles produce, and electronic pagination (`e12345`,
+  `e1-e12`) kept.
+- **More report numbers.** RFC, DOE, NASA, NTRS, NACA, DoD `AD-A` and EPA
+  numbers are recognised alongside the existing PB, NUREG, WHO, GB/T and ISO
+  forms.
+
+### Changed
+
+- **A standard number is no longer a reference.** `ISO 9001`, `GB/T 12345`
+  and `RFC-1918` are read as text but never become entries. They were
+  recognised before and then filtered nowhere: the confidence they carried
+  was recorded and never looked at, so a research conversation mentioning
+  the ISO standard produced a phantom entry every time. Report numbers now
+  carry two confidences — a real report number is high, a standard number is
+  low — and the candidate layer drops the low ones.
+- **Report numbers are normalised.** `NTRS 123456`, `NTRS123456` and
+  `Ntrs123456` were three different keys and could be stored as three
+  records of one document; they are now one.
+
+### Fixed
+
+- **`RFC` followed by a number is no longer a report.** `RFC 1918`, `RFC
+  2616`, `RFC 5322` and `RFC 2119` are protocol numbers that appear in
+  ordinary technical writing, and each of them became a citation. The
+  hyphenated form is recognised; the space-separated one is not.
+
+Tests: 30 files / 455 tests.
+
+### 中文
+
+一个带标识符的链接现在能产生一条文献，一个粘进来的 BibTeX 条目能读成一条文献，
+技术文档里用的报告号也能认出来 —— 而技术文档里同样在用的标准号不会。
+
+### 新增
+
+- **链接里的标识符。** `arxiv.org/abs/…`、`arxiv.org/pdf/…`、
+  `arxiv.org/format/…`、`doi.org/…`、`dx.doi.org/…`、bioRxiv 与 medRxiv
+  的链接本来就能解析；现在这样得到的链接还会产生一个可以拿去查注册表的候选，
+  所以贴一条光秃秃的 arXiv 链接能捕获到那篇论文，而不是什么都没有。
+- **BibTeX 条目。** 粘进来的 `@article{…}` 块会被读成一条引用：`@type`
+  映射成条目类型，取 `title`、`author`、`year`、`journal` 或 `booktitle`、
+  `volume`、`number`、`pages` 与 `doi`，`@string` 宏会被展开，花括号会配对，
+  `Last, First` 与 `First Last` 两种作者写法会归一成同一种形状。一段消息里
+  贴几个块就读成几条引用。没有题名的条目会被跳过，不会存成空条目。
+- **Vancouver 参考文献行。** 医学常用的编号格式
+  `1. Smith J, Doe A. Title. Journal. 2020;12(3):45-67.` 能解析，
+  「姓 + 缩写」的作者写法会转成与其他格式一样的「姓, 缩写」形状，
+  电子页码（`e12345`、`e1-e12`）也会保留。
+- **更多报告号。** 除了原有的 PB、NUREG、WHO、GB/T、ISO，还认 RFC、DOE、
+  NASA、NTRS、NACA、DoD 的 `AD-A` 与 EPA 编号。
+
+### 变更
+
+- **标准号不再算文献。** `ISO 9001`、`GB/T 12345`、`RFC-1918` 只被当成文本，
+  不会成为条目。以前它们是能识别的，而那个置信度只是记下来、从没被看过，
+  于是研究对话里提一次 ISO 标准就会凭空多出一条条目。现在报告号有两档置信度 ——
+  真报告号高、标准号低 —— 候选层会把低的那一档丢掉。
+- **报告号会归一。** `NTRS 123456`、`NTRS123456` 与 `Ntrs123456` 以前是三个
+  不同的键，可能把同一份文件存成三条记录；现在是一条。
+
+### 修复
+
+- **`RFC` 后面跟数字不再算报告号。** `RFC 1918`、`RFC 2616`、`RFC 5322`、
+  `RFC 2119` 是普通技术写作里常见的协议编号，以前每一个都会变成一条引用。
+  现在只认带连字符的写法。
+
+测试：30 个文件 / 455 项。
+
 ## 0.1.4 — 2026-11-11
 
 Compared with v0.1.3, this release adds labeled PMID/PMCID verification and storage, restores historical arXiv identifiers, and clarifies where captured references are stored versus where exports are written.

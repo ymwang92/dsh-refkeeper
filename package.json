@@ -1,6 +1,6 @@
 {
   "name": "dsh-refkeeper",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Verify and export the references your AI conversation already cited: BibTeX/RIS with evidence-anchored annotations.",
   "author": "dsh-refkeeper contributors",
   "repository": {
