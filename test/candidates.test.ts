@@ -158,7 +158,7 @@ describe('mergeCandidates', () => {
 })
 
 describe('report candidate confidence', () => {
-  it('keeps high-confidence report IDs and filters bare standards', () => {
+  it('keeps high-confidence reports and filters bare standards', () => {
     const reports = extractCandidates([{
       seq: 1,
       text: 'PB123456; NUREG-1234; WHO/AB/1234; DOE/BR-123456; NASA/TM-2020-12345; NTRS 123456; NACA 1234; AD-A123456; EPA-600-R-123',
@@ -169,11 +169,25 @@ describe('report candidate confidence', () => {
     ])
     expect(reports.every((candidate) => candidate.confidence === 0.8)).toBe(true)
 
-    const standards = extractCandidates([{
+    const rfcCandidates = extractCandidates([{
       seq: 2,
-      text: 'GB/T 12345; ISO 8601; ISO 9001; RFC-9110',
+      text: 'RFC-9110; RFC-822; RFC-2616',
     }])
-    expect(standards).toEqual([])
+    expect(rfcCandidates
+      .map(({ reportNumber, confidence }) => ({ reportNumber, confidence }))
+      .sort((left, right) => (left.reportNumber ?? '').localeCompare(right.reportNumber ?? '')),
+    ).toEqual([
+      { reportNumber: 'RFC-2616', confidence: 0.8 },
+      { reportNumber: 'RFC-822', confidence: 0.8 },
+      { reportNumber: 'RFC-9110', confidence: 0.8 },
+    ])
+
+    const standards = [
+      'RFC 1918', 'RFC 2616', 'RFC 5322', 'RFC 2119', 'ISO 9001', 'ISO 8601', 'GB/T 12345',
+    ]
+    for (const text of standards) {
+      expect(extractCandidates([{ seq: 3, text }])).toEqual([])
+    }
   })
 })
 

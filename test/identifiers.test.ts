@@ -140,7 +140,7 @@ describe('extractIdentifiers', () => {
 
   describe('additional report formats', () => {
     const positives = [
-      { input: 'RFC-9110', value: 'RFC-9110', confidence: 0.4 },
+      { input: 'RFC-9110', value: 'RFC-9110', confidence: 0.8 },
       { input: 'DOE/BR-123456', value: 'DOE/BR-123456', confidence: 0.8 },
       { input: 'DOE/BR123456', value: 'DOE/BR123456', confidence: 0.8 },
       { input: 'doe/er-0313', value: 'DOE/ER-0313', confidence: 0.8 },
@@ -208,7 +208,7 @@ describe('extractIdentifiers', () => {
       expect(extractIdentifiers('NACA-1234; NUREG-1234; RFC-9110')).toEqual([
         { kind: 'report', value: 'NACA-1234', raw: 'NACA-1234', host: '', confidence: 0.8 },
         { kind: 'report', value: 'NUREG-1234', raw: 'NUREG-1234', host: '', confidence: 0.8 },
-        { kind: 'report', value: 'RFC-9110', raw: 'RFC-9110', host: '', confidence: 0.4 },
+        { kind: 'report', value: 'RFC-9110', raw: 'RFC-9110', host: '', confidence: 0.8 },
       ])
     })
   })

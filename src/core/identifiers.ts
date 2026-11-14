@@ -308,7 +308,7 @@ export function extractIdentifiers(text: string): IdentifierHit[] {
 }
 
 function confidenceForReport(raw: string): number {
-  return /^(?:GB\/T|ISO|RFC-)/iu.test(raw) ? 0.4 : 0.8
+  return /^(?:GB\/T|ISO)/iu.test(raw) ? 0.4 : 0.8
 }
 
 /** Report numbers vary by spacing/case; comparing a compact form avoids misses. */
