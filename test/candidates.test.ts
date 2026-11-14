@@ -67,6 +67,40 @@ describe('extractCandidates', () => {
     expect(kept[0]?.type).toBe('webpage')
   })
 
+  it('extracts identifiers from URL-only user and assistant messages', () => {
+    const cases: readonly { readonly url: string; readonly field: 'doi' | 'arxivId'; readonly value: string }[] = [
+      { url: 'https://arxiv.org/abs/2401.01234', field: 'arxivId', value: '2401.01234' },
+      { url: 'https://arxiv.org/pdf/2401.01234v2', field: 'arxivId', value: '2401.01234' },
+      { url: 'https://arxiv.org/format/2401.01234v2', field: 'arxivId', value: '2401.01234' },
+      { url: 'https://arxiv.org/format/math.GT/0309136v2', field: 'arxivId', value: 'math.GT/0309136' },
+      { url: 'https://export.arxiv.org/format/2401.01234', field: 'arxivId', value: '2401.01234' },
+      { url: 'https://doi.org/10.1000/doi-host', field: 'doi', value: '10.1000/doi-host' },
+      { url: 'https://dx.doi.org/10.1000/dx-host', field: 'doi', value: '10.1000/dx-host' },
+      { url: 'https://www.biorxiv.org/content/10.1101/2024.01.02.573001', field: 'doi', value: '10.1101/2024.01.02.573001' },
+      { url: 'https://www.medrxiv.org/content/10.1101/2024.01.02.573002', field: 'doi', value: '10.1101/2024.01.02.573002' },
+    ]
+
+    for (const role of ['user', 'assistant'] as const) {
+      for (const [index, sample] of cases.entries()) {
+        const candidates = extractCandidates([{ seq: index + 1, role, text: sample.url }])
+        expect(candidates).toHaveLength(1)
+        expect(candidates[0]?.[sample.field]).toBe(sample.value)
+        expect(candidates[0]?.title).toBe('')
+      }
+    }
+  })
+
+  it('does not invent DOI or arXiv identifiers from publisher or forum URLs', () => {
+    for (const url of [
+      'https://www.nature.com/articles/s41586-024-00001-x',
+      'https://openreview.net/forum?id=abc123',
+      'https://www.sciencedirect.com/science/article/pii/S0000000000000000',
+    ]) {
+      const candidates = extractCandidates([{ seq: 1, text: url }])
+      expect(candidates.every((candidate) => candidate.doi === '' && candidate.arxivId === '')).toBe(true)
+    }
+  })
+
   it('attaches an identifier that sits on the same line as a citation string', () => {
     const candidate = citationCandidate(
       'Zhang, S. (2024). A study of retrieval augmentation. Journal of Testing, 2(1), 3-9. doi:10.1000/jt.2024.1',

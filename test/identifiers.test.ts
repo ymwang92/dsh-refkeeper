@@ -42,6 +42,12 @@ describe('extractIdentifiers', () => {
     expect(kinds('https://arxiv.org/abs/2401.01234v2')).toEqual(['arxiv:2401.01234'])
   })
 
+  it('turns arXiv format URLs into new and old IDs, including the export host', () => {
+    expect(kinds('https://arxiv.org/format/2401.01234v2')).toEqual(['arxiv:2401.01234'])
+    expect(kinds('https://arxiv.org/format/math.GT/0309136v2')).toEqual(['arxiv:math.GT/0309136'])
+    expect(kinds('https://export.arxiv.org/format/2401.01234')).toEqual(['arxiv:2401.01234'])
+  })
+
   it('reads bare arXiv mentions', () => {
     expect(kinds('preprint arXiv: 2106.09685')).toEqual(['arxiv:2106.09685'])
   })
@@ -74,10 +80,11 @@ describe('extractIdentifiers', () => {
     expect(kinds('not-a-category/0309136')).toEqual([])
   })
 
-  it('recognizes old-style arXiv abs and pdf URLs as IDs rather than plain URLs', () => {
+  it('recognizes old-style arXiv abs, pdf, and format URLs as IDs rather than plain URLs', () => {
     for (const url of [
       'https://arxiv.org/abs/math.GT/0309136',
       'https://arxiv.org/pdf/math.GT/0309136v2',
+      'https://arxiv.org/format/math.GT/0309136v2',
     ]) {
       expect(extractIdentifiers(url)).toMatchObject([
         { kind: 'arxiv', value: 'math.GT/0309136', host: 'arxiv.org' },

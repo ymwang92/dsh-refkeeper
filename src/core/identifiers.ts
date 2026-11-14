@@ -93,7 +93,7 @@ const ARXIV_OLD_ID = `${ARXIV_OLD_CATEGORIES}(?:\\.[a-z0-9-]+)?/\\d{7,8}`
 // ARXIV_URL, which knows the host, so excluding `/` here loses nothing.
 const ARXIV_OLD = new RegExp(`(?<![/\\w])(?:arxiv\\s*:\\s*)?(${ARXIV_OLD_ID})(?:v\\d+)?\\b`, 'giu')
 const ARXIV_URL_SOURCE =
-  `\\barxiv\\.org\\/(?:abs|pdf)\\/((?:\\d{4}\\.\\d{4,5})|${ARXIV_OLD_ID})(?:v\\d+)?`
+  `\\barxiv\\.org\\/(?:abs|pdf|format)\\/((?:\\d{4}\\.\\d{4,5})|${ARXIV_OLD_ID})(?:v\\d+)?`
 const ARXIV_URL = new RegExp(ARXIV_URL_SOURCE, 'giu')
 const ARXIV_URL_IN_URL = new RegExp(ARXIV_URL_SOURCE, 'iu')
 /** PMID and PMCID identifiers must be explicitly labeled to avoid numeric false positives. */

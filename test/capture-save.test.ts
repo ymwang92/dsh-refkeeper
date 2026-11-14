@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Candidate } from '../src/core/candidates.ts'
+import { extractCandidates } from '../src/core/candidates.ts'
 import { saveCaptured } from '../src/host/capture-save.ts'
 import type { SourceRecord } from '../src/verify/types.ts'
 
@@ -144,6 +145,52 @@ describe('saveCaptured identifier hydration', () => {
     })
     expect(summary).toMatchObject({ saved: 1, quarantined: 0, skipped: 0, failed: 0 })
     expect(summary.entries?.[0]).toMatchObject({ status: 'saved', arxivId: '2401.01234' })
+  })
+
+  it('resolves an arXiv format URL-only candidate through the normal save path', async () => {
+    const candidates = extractCandidates([{
+      seq: 21,
+      role: 'user',
+      text: 'https://arxiv.org/format/math.GT/0309136v2',
+    }])
+    expect(candidates).toHaveLength(1)
+    const candidate = candidates[0]
+    if (candidate === undefined) throw new Error('Expected an arXiv format URL candidate')
+    expect(candidate).toMatchObject({ title: '', arxivId: 'math.GT/0309136' })
+
+    const arxivRecord: SourceRecord = {
+      source: 'arxiv',
+      id: 'math.GT/0309136v2',
+      title: 'An old-style arXiv example',
+      authors: ['Zhang San'],
+      year: 2003,
+      container: 'arXiv',
+      doi: '',
+      type: 'preprint',
+      url: 'https://arxiv.org/abs/math.GT/0309136',
+    }
+    let resolverCalls = 0
+    let savedPayload: Record<string, unknown> | undefined
+    const summary = await saveCaptured([candidate], {
+      resolveIdentifier: async (seen) => {
+        resolverCalls += 1
+        expect(seen.title).toBe('')
+        expect(seen.arxivId).toBe('math.GT/0309136')
+        return arxivRecord
+      },
+      save: async (payload) => {
+        savedPayload = payload as Record<string, unknown>
+        return { kind: 'success' }
+      },
+    })
+
+    expect(resolverCalls).toBe(1)
+    expect(savedPayload).toMatchObject({
+      title: 'An old-style arXiv example',
+      arxivId: 'math.GT/0309136',
+      url: 'https://arxiv.org/abs/math.GT/0309136',
+    })
+    expect(summary).toMatchObject({ saved: 1, quarantined: 0, skipped: 0, failed: 0 })
   })
 
   it('counts an unresolvable identifier as skipped without inventing a title', async () => {
