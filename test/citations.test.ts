@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { extractCitations } from '../src/core/citations.ts'
+import { describe, expect, it, vi } from 'vitest'
+import { extractCitations, parseBibtexBlock, parseBibtexBlocks } from '../src/core/citations.ts'
 
 function first(text: string) {
   const hits = extractCitations(text)
@@ -158,5 +158,144 @@ describe('Markdown decoration around a quoted reference', () => {
     const hit = first(quoted)
     expect(hit.container).toBe('International Journal of Climatology')
     expect(hit.title).toBe('Physiographically sensitive mapping of temperature')
+  })
+})
+
+describe('BibTeX citations', () => {
+  it.each([
+    ['article', 'journalArticle'],
+    ['inproceedings', 'conferencePaper'],
+    ['conference', 'conferencePaper'],
+    ['book', 'book'],
+    ['inbook', 'book'],
+    ['incollection', 'book'],
+    ['techreport', 'report'],
+    ['report', 'report'],
+    ['unpublished', 'report'],
+    ['phdthesis', 'thesis'],
+    ['mastersthesis', 'thesis'],
+    ['misc', 'webpage'],
+    ['manual', 'webpage'],
+  ] as const)('maps @%s to %s', (entryType, expectedType) => {
+    const hit = parseBibtexBlock(`@${entryType}{key, title={A test title}, year={2024}}`)
+    expect(hit?.type).toBe(expectedType)
+    expect(hit?.style).toBe('bibtex')
+  })
+
+  it('maps article fields exactly, including nested braces and normalized authors', () => {
+    const record = `@article{smith2024,
+  author = {John Smith and Jane Q. Doe and {Research and Development Group}},
+  title = {A {nested} title for testing},
+  year = {2024-06},
+  journal = {Journal of Tests},
+  volume = {12},
+  number = {3},
+  pages = {101--115},
+  doi = {https://doi.org/10.1000/AbC}
+}`
+
+    expect(parseBibtexBlock(record)).toEqual({
+      style: 'bibtex',
+      type: 'journalArticle',
+      title: 'A nested title for testing',
+      authors: ['Smith, John', 'Doe, Jane Q.', 'Research and Development Group'],
+      year: 2024,
+      container: 'Journal of Tests',
+      volume: '12',
+      issue: '3',
+      pages: '101--115',
+      doi: '10.1000/abc',
+      raw: record,
+      confidence: 0.9,
+    })
+  })
+
+  it('preserves every author when the list exceeds ten names', () => {
+    const authors = Array.from({ length: 12 }, (_, index) => `Given${index} Family${index}`)
+    const record = `@article{many, title={A title with many authors}, author={${authors.join(' and ')}}, year={2024}}`
+    const hit = parseBibtexBlock(record)
+
+    expect(hit?.authors).toEqual(authors.map((author, index) => `Family${index}, Given${index}`))
+  })
+
+  it('expands @string and month macros, including concatenated values', () => {
+    const text = `@string{journalname = {Journal of Tests}}
+@string{titleprefix = "Macro "}
+@string{titlesuffix = {Title}}
+@article{macro,
+  author = {Ada Lovelace},
+  title = titleprefix # titlesuffix,
+  journal = journalname,
+  month = jan,
+  year = {2024/06}
+}`
+    const hits = parseBibtexBlocks(text)
+
+    expect(hits).toHaveLength(1)
+    expect(hits[0]).toMatchObject({
+      style: 'bibtex',
+      title: 'Macro Title',
+      authors: ['Lovelace, Ada'],
+      year: 2024,
+      container: 'Journal of Tests',
+    })
+  })
+
+  it('scans multiple nested, quoted and parenthesized records while skipping comments and strings', () => {
+    const text = `@comment{ignore this fake record @article{fake, title={Not a hit}, year=2000}}
+@string{venue = {Proceedings of Tests}}
+@inproceedings{nested,
+  title = {A {nested} title},
+  booktitle = venue,
+  year = {2024}
+}
+@misc(quoted, title = "A quoted {nested} title with (parentheses)", year = {2024/05})`
+    const hits = parseBibtexBlocks(text)
+
+    expect(hits).toHaveLength(2)
+    expect(hits[0]).toMatchObject({ type: 'conferencePaper', title: 'A nested title', container: 'Proceedings of Tests' })
+    expect(hits[1]).toMatchObject({ type: 'webpage', title: 'A quoted nested title with (parentheses)', year: 2024 })
+    expect(hits[0]?.raw).toContain('@inproceedings{nested,')
+    expect(hits[1]?.raw).toContain('@misc(quoted,')
+  })
+
+  it('returns no hit for comments, strings, preambles and records without a title', () => {
+    expect(parseBibtexBlocks('@comment{comment only}\n@string{j = {Journal}}\n@preamble{"ignored"}')).toEqual([])
+    expect(parseBibtexBlock('@article{missing, author={Ada Lovelace}, year={2024}}')).toBeUndefined()
+  })
+
+  it('reports unknown and cyclic macros instead of silently dropping fields', () => {
+    expect(() =>
+      parseBibtexBlock('@article{unknown, title=missingtitle, year={2024}}'),
+    ).toThrow('Unexpandable BibTeX macro "missingtitle" in field "title"')
+    expect(() =>
+      parseBibtexBlock('@article{cycle, title=first, year={2024}}', new Map([['first', 'second'], ['second', 'first']])),
+    ).toThrow('Cyclic BibTeX macro "first" in field "title"')
+  })
+
+  it('extracts BibTeX before legacy prose parsing and preserves the trimmed raw block', () => {
+    const record = '  @article{extract, title={BibTeX before prose}, year={2024}, doi={10.1000/test}}  '
+    const hits = extractCitations(
+      `${record}\nZhang, S. (2023). A legacy paper about retrieval. Journal of Testing, 2(1), 3-9.`,
+    )
+
+    expect(hits.map((hit) => hit.style)).toEqual(['bibtex', 'apa'])
+    expect(hits[0]?.raw).toBe(record.trim())
+    expect(hits[0]?.doi).toBe('10.1000/test')
+  })
+
+  it('reports a failed record macro and continues parsing later records', () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const hits = parseBibtexBlocks(
+      '@article{bad, title=missingtitle, year={2024}}\n@article{good, title={A good title}, year={2024}}',
+    )
+
+    expect(hits).toHaveLength(1)
+    expect(hits[0]?.title).toBe('A good title')
+    expect(warning).toHaveBeenCalledWith(
+      '[refkeeper] BibTeX parse failed:',
+      'Unexpandable BibTeX macro "missingtitle" in field "title"',
+    )
+    warning.mockRestore()
   })
 })

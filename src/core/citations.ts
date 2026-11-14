@@ -13,7 +13,7 @@ import { normalizeDoi } from './identifiers.ts'
 import { hasCjk, stripMarkup } from './text.ts'
 
 /** Recognized reference-string styles. */
-export type CitationStyle = 'gbt7714' | 'apa' | 'ieee'
+export type CitationStyle = 'gbt7714' | 'apa' | 'ieee' | 'bibtex'
 
 /** Item type carried into BibTeX/RIS mapping later. */
 export type ItemType =
@@ -279,10 +279,371 @@ function scoreHit(hit: CitationHit): number {
   return score
 }
 
-export function extractCitations(text: string): CitationHit[] {
+interface BibtexBlock {
+  readonly start: number
+  readonly end: number
+  readonly type: string
+  readonly raw: string
+  readonly body: string
+}
+
+class BibtexParseError extends Error {}
+
+/** Find complete @records without being confused by nested braces or quotes. */
+function scanBibtexBlocks(text: string): BibtexBlock[] {
+  const matcher = /@([a-z][a-z0-9_-]*)\s*([({])/giu
+  const blocks: BibtexBlock[] = []
+  let match = matcher.exec(text)
+  while (match !== null) {
+    const start = match.index
+    const type = (match[1] ?? '').toLowerCase()
+    const opening = match[2] ?? ''
+    let braceDepth = opening === '{' ? 1 : 0
+    let parenDepth = opening === '(' ? 1 : 0
+    let quoted = false
+    let escaped = false
+    let end = -1
+    for (let index = matcher.lastIndex; index < text.length; index += 1) {
+      const character = text[index] ?? ''
+      if (quoted) {
+        if (escaped) escaped = false
+        else if (character.charCodeAt(0) === 92) escaped = true
+        else if (character === '\"') quoted = false
+        continue
+      }
+      if (character === '\"' && (opening === '{' ? braceDepth === 1 : braceDepth === 0)) {
+        quoted = true
+        continue
+      }
+      if (character === '{') {
+        braceDepth += 1
+        continue
+      }
+      if (character === '}' && braceDepth > 0) {
+        braceDepth -= 1
+        if (opening === '{' && braceDepth === 0) {
+          end = index + 1
+          break
+        }
+        continue
+      }
+      if (opening === '(' && braceDepth === 0) {
+        if (character === '(') parenDepth += 1
+        else if (character === ')') {
+          parenDepth -= 1
+          if (parenDepth === 0) {
+            end = index + 1
+            break
+          }
+        }
+      }
+    }
+    if (end < 0) {
+      matcher.lastIndex = start + 1
+      match = matcher.exec(text)
+      continue
+    }
+    const raw = text.slice(start, end).trim()
+    const bodyStart = matcher.lastIndex
+    const bodyEnd = end - 1
+    blocks.push({ start, end, type, raw, body: text.slice(bodyStart, bodyEnd).trim() })
+    matcher.lastIndex = end
+    match = matcher.exec(text)
+  }
+  return blocks
+}
+
+function splitBibtexTopLevel(value: string, delimiter: string): string[] {
+  const parts: string[] = []
+  let start = 0
+  let braceDepth = 0
+  let quoted = false
+  let escaped = false
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index] ?? ''
+    if (quoted) {
+      if (escaped) escaped = false
+      else if (character.charCodeAt(0) === 92) escaped = true
+      else if (character === '\"') quoted = false
+      continue
+    }
+    if (character === '\"' && braceDepth === 0) {
+      quoted = true
+      continue
+    }
+    if (character === '{') braceDepth += 1
+    else if (character === '}' && braceDepth > 0) braceDepth -= 1
+    else if (character === delimiter && braceDepth === 0) {
+      parts.push(value.slice(start, index))
+      start = index + 1
+    }
+  }
+  parts.push(value.slice(start))
+  return parts
+}
+
+function topLevelIndex(value: string, delimiter: string): number {
+  let braceDepth = 0
+  let quoted = false
+  let escaped = false
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index] ?? ''
+    if (quoted) {
+      if (escaped) escaped = false
+      else if (character.charCodeAt(0) === 92) escaped = true
+      else if (character === '\"') quoted = false
+      continue
+    }
+    if (character === '\"' && braceDepth === 0) {
+      quoted = true
+      continue
+    }
+    if (character === '{') braceDepth += 1
+    else if (character === '}' && braceDepth > 0) braceDepth -= 1
+    else if (character === delimiter && braceDepth === 0) return index
+  }
+  return -1
+}
+
+function parseBibtexFields(block: BibtexBlock, includeFirstAssignment: boolean): Map<string, string> {
+  const parts = splitBibtexTopLevel(block.body, ',')
+  const fields = new Map<string, string>()
+  for (const part of parts.slice(includeFirstAssignment ? 0 : 1)) {
+    const trimmed = part.trim()
+    if (trimmed === '') continue
+    const equals = topLevelIndex(trimmed, '=')
+    if (equals < 0) {
+      if (includeFirstAssignment) throw new BibtexParseError(`Invalid @string definition: ${trimmed}`)
+      continue
+    }
+    const name = trimmed.slice(0, equals).trim().toLowerCase()
+    if (!/^[a-z][a-z0-9_-]*$/u.test(name)) {
+      throw new BibtexParseError(`Invalid BibTeX field name: ${name || trimmed}`)
+    }
+    fields.set(name, trimmed.slice(equals + 1).trim())
+  }
+  return fields
+}
+
+function isWrappedByBraces(value: string): boolean {
+  if (!value.startsWith('{') || !value.endsWith('}')) return false
+  let depth = 0
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index] ?? ''
+    if (character === '{') depth += 1
+    else if (character === '}') depth -= 1
+    if (depth === 0 && index < value.length - 1) return false
+    if (depth < 0) return false
+  }
+  return depth === 0
+}
+
+function cleanBibtexText(value: string): string {
+  return value
+    .replace(/\\([{}#%&_$])/gu, '$1')
+    .replace(/\\(["\\])/gu, '$1')
+    .replace(/[{}]/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim()
+}
+
+function cleanBibtexLiteral(value: string): string {
+  const cleaned = cleanBibtexText(value)
+  if (cleaned === '') return ''
+  return `${/^\s/u.test(value) ? ' ' : ''}${cleaned}${/\s$/u.test(value) ? ' ' : ''}`
+}
+
+function cleanBibtexAuthorText(value: string): string {
+  return value.replace(/\s+/gu, ' ').trim()
+}
+
+function expandBibtexValue(
+  expression: string,
+  macros: ReadonlyMap<string, string>,
+  field: string,
+  stack: readonly string[] = [],
+  preserveAuthorBraces = false,
+): string {
+  return splitBibtexTopLevel(expression, '#')
+    .map((part) => {
+      const value = part.trim()
+      if (value === '') return ''
+      if (isWrappedByBraces(value)) {
+        const inner = value.slice(1, -1)
+        return preserveAuthorBraces ? cleanBibtexAuthorText(inner) : cleanBibtexLiteral(inner)
+      }
+      if (value.startsWith('\"') && value.endsWith('\"')) {
+        const inner = value.slice(1, -1)
+        return preserveAuthorBraces ? cleanBibtexAuthorText(inner) : cleanBibtexLiteral(inner)
+      }
+      if (/^\d+$/u.test(value) || /^\d+[a-z0-9./:+_-]*$/iu.test(value)) return value
+      if (/^[a-z][a-z0-9_-]*$/iu.test(value)) {
+        const macro = value.toLowerCase()
+        const expansion = macros.get(macro)
+        if (expansion === undefined) {
+          throw new BibtexParseError(`Unexpandable BibTeX macro "${value}" in field "${field}"`)
+        }
+        if (stack.includes(macro)) {
+          throw new BibtexParseError(`Cyclic BibTeX macro "${value}" in field "${field}"`)
+        }
+        return expandBibtexValue(expansion, macros, field, [...stack, macro], preserveAuthorBraces)
+      }
+      if (/^[a-z][a-z0-9+.-]*:\/\/\S+$/iu.test(value)) return value
+      throw new BibtexParseError(`Unexpandable BibTeX value "${value}" in field "${field}"`)
+    })
+    .join('')
+}
+
+function splitBibtexAuthors(raw: string): string[] {
+  const names: string[] = []
+  let start = 0
+  let braceDepth = 0
+  for (let index = 0; index < raw.length; index += 1) {
+    const character = raw[index] ?? ''
+    if (character === '{') braceDepth += 1
+    else if (character === '}' && braceDepth > 0) braceDepth -= 1
+    if (braceDepth !== 0) continue
+    const separator = raw.slice(index).match(/^\s+and\s+/iu)?.[0]
+    if (separator === undefined) continue
+    names.push(raw.slice(start, index).trim())
+    index += separator.length - 1
+    start = index + 1
+  }
+  names.push(raw.slice(start).trim())
+  return names
+    .filter((name) => name !== '')
+    .map((name) => {
+      const corporate = isWrappedByBraces(name)
+      const cleaned = cleanBibtexText(name)
+      if (corporate || cleaned.includes(',')) return cleaned
+      const words = cleaned.split(/\s+/u)
+      if (words.length < 2) return cleaned
+      const surname = words.pop() ?? ''
+      return `${surname}, ${words.join(' ')}`
+    })
+}
+
+const BIBTEX_TYPES: Readonly<Record<string, ItemType>> = {
+  article: 'journalArticle',
+  inproceedings: 'conferencePaper',
+  conference: 'conferencePaper',
+  book: 'book',
+  inbook: 'book',
+  incollection: 'book',
+  techreport: 'report',
+  report: 'report',
+  unpublished: 'report',
+  phdthesis: 'thesis',
+  mastersthesis: 'thesis',
+  misc: 'webpage',
+}
+
+const BIBTEX_MONTHS: Readonly<Record<string, string>> = {
+  jan: '{January}', feb: '{February}', mar: '{March}', apr: '{April}', may: '{May}', jun: '{June}',
+  jul: '{July}', aug: '{August}', sep: '{September}', oct: '{October}', nov: '{November}', dec: '{December}',
+}
+
+function normalizeBibtexDoi(value: string): string {
+  const normalizedValue = value.trim()
+  const lowercase = normalizedValue.toLowerCase()
+  const prefixes = ['https://doi.org/', 'http://doi.org/', 'https://dx.doi.org/', 'http://dx.doi.org/']
+  const prefix = prefixes.find((candidate) => lowercase.startsWith(candidate))
+  return normalizeDoi(prefix === undefined ? normalizedValue : normalizedValue.slice(prefix.length))
+}
+
+function parseBibtexRecord(block: BibtexBlock, macros: ReadonlyMap<string, string>): CitationHit | undefined {
+  if (block.type === 'comment' || block.type === 'string' || block.type === 'preamble') return undefined
+  const rawFields = parseBibtexFields(block, false)
+  const fields = new Map<string, string>()
+  for (const [name, expression] of rawFields) {
+    // Expand even fields that CitationHit cannot represent (e.g. publisher), so
+    // an unknown macro is always explicit rather than silently discarded.
+    const preserveAuthorBraces = name === 'author'
+    const expanded = expandBibtexValue(expression, macros, name, [], preserveAuthorBraces)
+    fields.set(name, preserveAuthorBraces ? expanded.trim() : cleanBibtexText(expanded))
+  }
+  const title = fields.get('title') ?? ''
+  if (title === '') return undefined
+  const yearText = fields.get('year') ?? ''
+  const yearMatch = yearText.match(/^((?:18|19|20|21)\d{2})(?:-(?:0[1-9]|1[0-2])|\/(?:0[1-9]|1[0-2]))?$/u)
+  const year = yearMatch === null ? undefined : plausibleYear(yearMatch[1])
+  const doiText = fields.get('doi') ?? ''
+  return {
+    style: 'bibtex',
+    type: BIBTEX_TYPES[block.type] ?? 'webpage',
+    title,
+    authors: splitBibtexAuthors(fields.get('author') ?? ''),
+    year,
+    container: fields.get('journal') ?? fields.get('booktitle') ?? '',
+    volume: fields.get('volume') ?? '',
+    issue: fields.get('number') ?? '',
+    pages: fields.get('pages') ?? '',
+    doi: doiText === '' ? '' : normalizeBibtexDoi(doiText),
+    raw: block.raw,
+    confidence: 0.9,
+  }
+}
+
+function reportBibtexFailure(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error)
+  console.warn('[refkeeper] BibTeX parse failed:', message)
+}
+
+function bibtexMacros(blocks: readonly BibtexBlock[]): Map<string, string> {
+  const macros = new Map<string, string>(Object.entries(BIBTEX_MONTHS))
+  for (const block of blocks) {
+    if (block.type !== 'string') continue
+    try {
+      for (const [name, expression] of parseBibtexFields(block, true)) macros.set(name, expression)
+    } catch (error) {
+      reportBibtexFailure(error)
+    }
+  }
+  return macros
+}
+
+function parseBibtexRecords(blocks: readonly BibtexBlock[]): CitationHit[] {
+  const macros = bibtexMacros(blocks)
   const hits: CitationHit[] = []
+  for (const block of blocks) {
+    try {
+      const hit = parseBibtexRecord(block, macros)
+      if (hit !== undefined) hits.push(hit)
+    } catch (error) {
+      reportBibtexFailure(error)
+    }
+  }
+  return hits
+}
+
+/** Parse BibTeX records in a text block, expanding @string definitions first. */
+export function parseBibtexBlocks(text: string): CitationHit[] {
+  return parseBibtexRecords(scanBibtexBlocks(text))
+}
+
+/** Parse one BibTeX record; throws when a referenced macro cannot be expanded. */
+export function parseBibtexBlock(block: string, macros: ReadonlyMap<string, string> = new Map()): CitationHit | undefined {
+  const located = scanBibtexBlocks(block)[0]
+  return located === undefined ? undefined : parseBibtexRecord(located, macros)
+}
+
+function removeBibtexBlocks(text: string, blocks: readonly BibtexBlock[]): string {
+  if (blocks.length === 0) return text
+  const remaining: string[] = []
+  let cursor = 0
+  for (const block of blocks) {
+    remaining.push(text.slice(cursor, block.start))
+    cursor = block.end
+  }
+  remaining.push(text.slice(cursor))
+  return remaining.join('\n')
+}
+
+export function extractCitations(text: string): CitationHit[] {
+  const blocks = scanBibtexBlocks(text)
+  const hits = parseBibtexRecords(blocks)
   const seen = new Set<string>()
-  for (const line of candidateLines(text)) {
+  for (const line of candidateLines(removeBibtexBlocks(text, blocks))) {
     if (line.length < 12 || line.length > MAX_LINE) continue
     const hit = parseGbt7714(line) ?? parseIeee(line) ?? parseApa(line)
     if (hit === undefined) continue
