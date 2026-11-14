@@ -13,7 +13,7 @@ import { normalizeDoi } from './identifiers.ts'
 import { hasCjk, stripMarkup } from './text.ts'
 
 /** Recognized reference-string styles. */
-export type CitationStyle = 'gbt7714' | 'apa' | 'ieee' | 'bibtex'
+export type CitationStyle = 'gbt7714' | 'apa' | 'ieee' | 'vancouver' | 'bibtex'
 
 /** Item type carried into BibTeX/RIS mapping later. */
 export type ItemType =
@@ -222,6 +222,53 @@ function parseIeee(line: string): CitationHit | undefined {
     doi: normalizeDoiIn(line),
     raw: line,
     confidence: 0.6,
+  }
+}
+
+const VANCOUVER = /^(?:[1-9]|1[0-9]|2[0-5])\.\s*(.{2,500}?)\.\s*(.{6,300}?)\.\s*(.{2,200}?)\.\s*(1[89]\d{2}|20\d{2})(?:\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec))?\s*;\s*(.*)$/iu
+
+/** Convert Vancouver surname-first names without changing legacy author parsing. */
+function splitVancouverAuthors(raw: string): string[] {
+  return raw
+    .split(/[,，]/u)
+    .map((part) => stripMarkup(part).trim())
+    .filter((author) => author !== '')
+    .map((author) => {
+      const match = author.match(/^(.*?)\s+([A-Z](?:[A-Z.-]{0,4}))$/u)
+      if (match === null) return author
+      const surname = match[1]?.trim() ?? ''
+      const initials = match[2]?.replace(/[^A-Z]/gu, '') ?? ''
+      return surname !== '' && initials.length > 0 && initials.length <= 3
+        ? `${surname}, ${initials}`
+        : author
+    })
+    .slice(0, 50)
+}
+
+/** Numbered Vancouver: `1. Author J. Title. Journal. 2024 Mar;47(3):1-15.` */
+function parseVancouver(line: string): CitationHit | undefined {
+  const match = line.match(VANCOUVER)
+  if (match === null) return undefined
+  const title = stripMarkup(match[2] ?? '')
+  if (!plausibleTitle(title)) return undefined
+  const year = plausibleYear(match[4])
+  if (year === undefined) return undefined
+  const tail = stripMarkup(match[6] ?? '')
+  const parsed = parseVolumeIssuePages(tail)
+  const pagination = tail.match(/^\s*(\d{1,5})(?:\s*[（(]\s*(\d{1,4})\s*[)）])?\s*[:：]\s*(e?\d{1,6}(?:\s*[-–—~]\s*e?\d{1,6})?)/iu)
+  return {
+    style: 'vancouver',
+    type: 'journalArticle',
+    title,
+    authors: splitVancouverAuthors(match[1] ?? ''),
+    year,
+    container: cleanContainer(match[3] ?? ''),
+    volume: parsed.volume || pagination?.[1] || '',
+    issue: parsed.issue || pagination?.[2] || '',
+    pages: parsed.pages || pagination?.[3]?.replace(/\s+/gu, '') || '',
+    doi: normalizeDoiIn(line),
+    raw: line,
+    confidence: 0.5,
   }
 }
 
@@ -645,7 +692,7 @@ export function extractCitations(text: string): CitationHit[] {
   const seen = new Set<string>()
   for (const line of candidateLines(removeBibtexBlocks(text, blocks))) {
     if (line.length < 12 || line.length > MAX_LINE) continue
-    const hit = parseGbt7714(line) ?? parseIeee(line) ?? parseApa(line)
+    const hit = parseGbt7714(line) ?? parseIeee(line) ?? parseVancouver(line) ?? parseApa(line)
     if (hit === undefined) continue
     const key = `${hit.style}:${hit.title.toLowerCase()}`
     if (seen.has(key)) {

@@ -69,6 +69,137 @@ describe('IEEE (English journals)', () => {
   })
 })
 
+describe('Vancouver (numbered biomedical references)', () => {
+  it('parses a numbered journal citation with issue and page range exactly', () => {
+    const input = '1. Smith J, Doe A. Title of the work. Journal Name. 2020;12(3):45-67.'
+    expect(first(input)).toEqual({
+      style: 'vancouver',
+      type: 'journalArticle',
+      title: 'Title of the work',
+      authors: ['Smith, J', 'Doe, A'],
+      year: 2020,
+      container: 'Journal Name',
+      volume: '12',
+      issue: '3',
+      pages: '45-67',
+      doi: '',
+      raw: input,
+      confidence: 0.5,
+    })
+  })
+
+  it('normalizes an optional DOI', () => {
+    const input = '2. Smith J, Doe A. Title of the work. Journal Name. 2020;12(3):45-67. doi:10.1000/abc'
+    expect(first(input)).toEqual({
+      style: 'vancouver',
+      type: 'journalArticle',
+      title: 'Title of the work',
+      authors: ['Smith, J', 'Doe, A'],
+      year: 2020,
+      container: 'Journal Name',
+      volume: '12',
+      issue: '3',
+      pages: '45-67',
+      doi: '10.1000/abc',
+      raw: input,
+      confidence: 0.5,
+    })
+  })
+
+  it('parses a volume without an issue', () => {
+    const input = '3. Smith J. Title of the work. Journal Name. 2020;12:45-67.'
+    expect(first(input)).toEqual({
+      style: 'vancouver',
+      type: 'journalArticle',
+      title: 'Title of the work',
+      authors: ['Smith, J'],
+      year: 2020,
+      container: 'Journal Name',
+      volume: '12',
+      issue: '',
+      pages: '45-67',
+      doi: '',
+      raw: input,
+      confidence: 0.5,
+    })
+  })
+
+  it('accepts a three-letter month before the volume', () => {
+    const input = '4. Smith J, Doe A, Brown B. Title of the work. Journal Name. 2020 Mar;12(3):45-67.'
+    expect(first(input)).toEqual({
+      style: 'vancouver',
+      type: 'journalArticle',
+      title: 'Title of the work',
+      authors: ['Smith, J', 'Doe, A', 'Brown, B'],
+      year: 2020,
+      container: 'Journal Name',
+      volume: '12',
+      issue: '3',
+      pages: '45-67',
+      doi: '',
+      raw: input,
+      confidence: 0.5,
+    })
+  })
+
+  it.each(['e12345', 'e1-e12'])('parses electronic pages %s exactly', (pages) => {
+    const input = `5. Jones A. Title of the work. Medical Journal. 2020;8(1):${pages}.`
+    expect(first(input)).toEqual({
+      style: 'vancouver',
+      type: 'journalArticle',
+      title: 'Title of the work',
+      authors: ['Jones, A'],
+      year: 2020,
+      container: 'Medical Journal',
+      volume: '8',
+      issue: '1',
+      pages,
+      doi: '',
+      raw: input,
+      confidence: 0.5,
+    })
+  })
+
+  it('converts trailing uppercase initials but preserves surnames without them', () => {
+    const input = '6. Smith JA, Doe A, B C, Van Der Berg. Title of the work. Journal Name. 2020;12(3):45-67.'
+    expect(first(input)?.authors).toEqual(['Smith, JA', 'Doe, A', 'B, C', 'Van Der Berg'])
+    expect(first('7. Van Der Berg SM. Title of the work. Journal Name. 2020;12(3):45-67.')?.authors)
+      .toEqual(['Van Der Berg, SM'])
+  })
+
+  it('keeps at least ten authors and caps the result at fifty', () => {
+    const manyAuthors = Array.from({ length: 12 }, (_, index) => `Researcher${index} ABC`)
+    const manyInput = `8. ${manyAuthors.join(', ')}. Title of the work. Journal Name. 2020;12(3):45-67.`
+    expect(first(manyInput)?.authors).toEqual(manyAuthors.map((author) => author.replace(' ABC', ', ABC')))
+
+    const cappedAuthors = Array.from({ length: 51 }, (_, index) => `A${index} B`)
+    const cappedInput = `9. ${cappedAuthors.join(', ')}. Title of the work. Journal Name. 2020;12(3):45-67.`
+    expect(first(cappedInput)?.authors).toEqual(cappedAuthors.slice(0, 50).map((author) => author.replace(' B', ', B')))
+  })
+
+  it('rejects numbered prose without a year and leaves repeated APA lines as APA', () => {
+    expect(extractCitations('1. Open the file and click Save.\n2. First step. Second step.')).toEqual([])
+
+    const apa = 'Smith, J. (2020). An APA reference. J, 12, 45.'
+    const hits = extractCitations(`${apa}\n${apa}`)
+    expect(hits).toHaveLength(1)
+    expect(hits[0]).toEqual({
+      style: 'apa',
+      type: 'journalArticle',
+      title: 'An APA reference',
+      authors: ['Smith, J.'],
+      year: 2020,
+      container: 'J',
+      volume: '',
+      issue: '',
+      pages: '',
+      doi: '',
+      raw: apa,
+      confidence: 0.5,
+    })
+  })
+})
+
 describe('rejection rules', () => {
   it('drops a citation string with no plausible year', () => {
     expect(extractCitations('[1] A. Author, "A title that is long enough," Journal, vol. 1, pp. 1-2.')).toEqual([])
