@@ -10,7 +10,7 @@
  */
 
 import { normalizeDoi } from './identifiers.ts'
-import { hasCjk, stripMarkup } from './text.ts'
+import { formatAuthorName, hasCjk, stripMarkup } from './text.ts'
 
 /** Recognized reference-string styles. */
 export type CitationStyle = 'gbt7714' | 'apa' | 'ieee' | 'vancouver' | 'bibtex'
@@ -562,11 +562,8 @@ function splitBibtexAuthors(raw: string): string[] {
     .map((name) => {
       const corporate = isWrappedByBraces(name)
       const cleaned = cleanBibtexText(name)
-      if (corporate || cleaned.includes(',')) return cleaned
-      const words = cleaned.split(/\s+/u)
-      if (words.length < 2) return cleaned
-      const surname = words.pop() ?? ''
-      return `${surname}, ${words.join(' ')}`
+      if (corporate) return cleaned
+      return formatAuthorName(cleaned)
     })
 }
 

@@ -7,10 +7,11 @@
  * failing fixture test instead of a runtime surprise during a capture.
  */
 
+import { formatAuthorName } from '../core/text.ts'
 import type { SourceId, SourceRecord } from './types.ts'
 
 /** Registries, in the order the verifier should try them. */
-export const SOURCE_ORDER: readonly SourceId[] = ['crossref', 'openalex', 'arxiv', 'datacite', 'pubmed']
+export const SOURCE_ORDER: readonly SourceId[] = ['crossref', 'openalex', 'arxiv', 'datacite', 'pubmed', 'openlibrary']
 
 /**
  * Optional `mailto` for the polite pool.
@@ -364,6 +365,13 @@ export function pmcSummaryUrl(uid: string): string {
   return `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pmc&id=${encodeURIComponent(uid)}&retmode=json&tool=dsh-refkeeper`
 }
 
+export function openlibraryIsbnUrl(isbn: string, options?: ContactOptions): string {
+  return withMailto(
+    `https://openlibrary.org/api/books?bibkeys=${encodeURIComponent(`ISBN:${isbn}`)}&format=json&jscmd=data`,
+    options,
+  )
+}
+
 function cleanPubMedTitle(value: unknown): string {
   if (typeof value !== 'string') return ''
   return value
@@ -585,6 +593,62 @@ function assertAtomFeed(source: SourceId, body: string): string {
   return xml
 }
 
+const OPEN_LIBRARY_SUFFIX = /(?:,\s*|\s+)(?:Jr|Sr|II|III|IV|V|VI|Ph\.?D|M\.?D|D\.?O|D\.?D\.?S|D\.?V\.?M|Esq|Ed\.?D)\.?$/iu
+
+function openLibraryAuthorName(value: string): string {
+  const withoutSuffix = value
+    .trim()
+    .replace(OPEN_LIBRARY_SUFFIX, '')
+    .replace(/,\s*$/u, '')
+    .trim()
+  return formatAuthorName(withoutSuffix)
+}
+
+export function parseOpenLibraryBody(body: string): SourceRecord[] {
+  const raw = jsonEnvelope('openlibrary', body)
+  const records: SourceRecord[] = []
+  for (const item of Object.values(raw)) {
+    if (!isRecord(item)) continue
+    const title = textOf(item['title']) ?? textOf(item['subtitle'])
+    if (title === undefined) continue
+
+    const identifiers = isRecord(item['identifiers']) ? item['identifiers'] : undefined
+    const identifier = identifiers === undefined ? undefined : strings(identifiers['openlibrary'])[0]
+    const key = textOf(item['key'])
+    const id = identifier ?? key?.split('/').filter(Boolean).at(-1)
+    if (id === undefined || id === '') continue
+
+    const authors = Array.isArray(item['authors'])
+      ? item['authors'].flatMap((author) => {
+          if (!isRecord(author)) return []
+          const name = textOf(author['name'])
+          return name === undefined ? [] : [openLibraryAuthorName(name)]
+        })
+      : []
+    const publisherValues = Array.isArray(item['publishers']) ? item['publishers'] : []
+    const firstPublisher = publisherValues.find(isRecord)
+    const publisher = firstPublisher === undefined ? undefined : textOf(firstPublisher['name'])
+    const publishDate = textOf(item['publish_date'])
+    const yearText = publishDate?.match(/\d{4}/u)?.[0]
+    const year = yearText === undefined ? undefined : Number(yearText)
+    const url = textOf(item['url']) ?? (key?.startsWith('/') === true ? `https://openlibrary.org${key}` : key) ?? ''
+
+    records.push({
+      source: 'openlibrary',
+      id,
+      title,
+      authors,
+      year,
+      container: publisher ?? '',
+      doi: '',
+      type: 'book',
+      url,
+      ...(publisher === undefined ? {} : { publisher }),
+    })
+  }
+  return records
+}
+
 /**
  * Parse a registry body, distinguishing "valid envelope, no records" from
  * "this is not the payload we expected".
@@ -655,6 +719,10 @@ export function parseSourceBody(source: SourceId, basis: BodyBasis, body: string
   if (source === 'pubmed') {
     if (basis !== 'id') throw new SourceBodyError(source, 'only exact-ID lookups are supported')
     return parsePubMedSummary(body)
+  }
+  if (source === 'openlibrary') {
+    if (basis !== 'id') throw new SourceBodyError(source, 'only exact-ID lookups are supported')
+    return parseOpenLibraryBody(body)
   }
   // Crossref
   const raw = jsonEnvelope(source, body)

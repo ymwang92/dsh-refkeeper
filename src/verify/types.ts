@@ -6,8 +6,9 @@
  * HTTP clients can be tested separately by parsing canned payloads.
  */
 
-/** The authoritative registries this plugin trusts. */
-export type SourceId = 'crossref' | 'openalex' | 'arxiv' | 'datacite' | 'pubmed'
+/** The known verification registries; plugin extensions may add other sources. */
+export const SOURCE_IDS = ['crossref', 'openalex', 'arxiv', 'datacite', 'pubmed'] as const
+export type SourceId = (typeof SOURCE_IDS)[number] | (string & {})
 
 /** One work as a registry reported it, normalized to the fields we compare. */
 export interface SourceRecord {

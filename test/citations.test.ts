@@ -341,6 +341,11 @@ describe('BibTeX citations', () => {
     })
   })
 
+  it('does not strip explicit suffixes from BibTeX authors', () => {
+    const hit = parseBibtexBlock('@book{suffix, title={A book}, author={George C. Clark, Jr.}, year={2024}}')
+    expect(hit?.authors).toEqual(['George C. Clark, Jr.'])
+  })
+
   it('preserves every author when the list exceeds ten names', () => {
     const authors = Array.from({ length: 12 }, (_, index) => `Given${index} Family${index}`)
     const record = `@article{many, title={A title with many authors}, author={${authors.join(' and ')}}, year={2024}}`

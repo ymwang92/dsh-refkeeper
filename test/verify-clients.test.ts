@@ -7,10 +7,12 @@ import {
   dataciteQueryUrl,
   openalexDoiUrl,
   openalexSearchUrl,
+  openlibraryIsbnUrl,
   parseArxivFeed,
   parseCrossrefSearch,
   parseCrossrefWork,
   parseDataciteWork,
+  parseOpenLibraryBody,
   parseOpenAlexSearch,
   parseOpenAlexWork,
   parseSourceBody,
@@ -74,6 +76,18 @@ const DATACITE_WORK = {
   },
 }
 
+const OPEN_LIBRARY_BOOK = {
+  'ISBN:9780306406157': {
+    title: 'The Example Book',
+    subtitle: 'A Study of Systems',
+    authors: [{ name: 'George C. Clark, Jr.' }],
+    publishers: [{ name: 'Example Press' }, { name: 'Other Press' }],
+    publish_date: '1981-05',
+    identifiers: { openlibrary: ['OL123M', 'OL999M'] },
+    url: 'https://openlibrary.org/books/OL123M/example-book',
+  },
+}
+
 describe('URL construction', () => {
   it('encodes DOIs and never invents a contact address', () => {
     expect(crossrefDoiUrl('10.1000/a b')).toContain('10.1000%2Fa%20b')
@@ -98,8 +112,15 @@ describe('URL construction', () => {
     )
   })
 
-  it('orders sources crossref, openalex, arxiv, datacite, pubmed', () => {
-    expect(SOURCE_ORDER).toEqual(['crossref', 'openalex', 'arxiv', 'datacite', 'pubmed'])
+  it('encodes Open Library ISBN keys and appends contact details', () => {
+    expect(openlibraryIsbnUrl('9780306406157')).toBe(
+      'https://openlibrary.org/api/books?bibkeys=ISBN%3A9780306406157&format=json&jscmd=data',
+    )
+    expect(openlibraryIsbnUrl('9780306406157', { mailto: 'me@example.org' })).toContain('mailto=me%40example.org')
+  })
+
+  it('orders Open Library after the existing registry sources', () => {
+    expect(SOURCE_ORDER).toEqual(['crossref', 'openalex', 'arxiv', 'datacite', 'pubmed', 'openlibrary'])
   })
 })
 
@@ -182,6 +203,53 @@ describe('DataCite parsing', () => {
     expect(() => parseSourceBody('datacite', 'search', JSON.stringify({ data: [{ attributes: { types: {} } }] }))).toThrow(
       'search response contains unreadable results',
     )
+  })
+})
+
+describe('Open Library parsing', () => {
+  it('normalizes an ISBN-keyed book and removes an explicit author suffix', () => {
+    const record = parseOpenLibraryBody(JSON.stringify(OPEN_LIBRARY_BOOK))[0]
+    expect(record).toMatchObject({
+      source: 'openlibrary',
+      id: 'OL123M',
+      title: 'The Example Book',
+      year: 1981,
+      container: 'Example Press',
+      publisher: 'Example Press',
+      type: 'book',
+      doi: '',
+      url: 'https://openlibrary.org/books/OL123M/example-book',
+    })
+    expect(record?.authors).toEqual(['Clark, George C.'])
+  })
+
+  it.each(['1981', '1975-03', 'March 1975'])('extracts a four-digit year from %s', (publishDate) => {
+    const body = {
+      ...OPEN_LIBRARY_BOOK,
+      'ISBN:9780306406157': { ...OPEN_LIBRARY_BOOK['ISBN:9780306406157'], publish_date: publishDate },
+    }
+    expect(parseOpenLibraryBody(JSON.stringify(body))[0]?.year).toBe(Number(publishDate.match(/\d{4}/u)?.[0]))
+  })
+
+  it('uses subtitle only when title is absent and falls back to the Open Library key', () => {
+    const body = {
+      'ISBN:9780306406157': {
+        title: '',
+        subtitle: 'Subtitle as title',
+        authors: [],
+        key: '/books/OL123M',
+      },
+    }
+    expect(parseOpenLibraryBody(JSON.stringify(body))[0]).toMatchObject({ title: 'Subtitle as title', id: 'OL123M' })
+  })
+
+  it('returns no candidates for an empty response or a record without a title', () => {
+    expect(parseOpenLibraryBody(JSON.stringify({}))).toEqual([])
+    expect(parseOpenLibraryBody(JSON.stringify({ 'ISBN:9780306406157': { authors: [{ name: 'No Title' }] } }))).toEqual([])
+  })
+
+  it('routes Open Library ID responses through the parser', () => {
+    expect(parseSourceBody('openlibrary', 'id', JSON.stringify(OPEN_LIBRARY_BOOK))).toHaveLength(1)
   })
 })
 

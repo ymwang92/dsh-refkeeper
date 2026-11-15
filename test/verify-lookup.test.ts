@@ -8,6 +8,7 @@ import {
   dataciteQueryUrl,
   openalexDoiUrl,
   openalexSearchUrl,
+  openlibraryIsbnUrl,
   pmcSearchUrl,
   pubmedIdUrl,
 } from '../src/verify/clients.ts'
@@ -249,8 +250,8 @@ describe('lookupRecords', () => {
 
   it.each([
     {
-      label: 'preserves DOI registry order',
-      identity: { doi: '10.1000/abc', reportNumber: 'NASA/TM 2024-1234' },
+      label: 'preserves DOI registry order and skips ISBN when DOI exists',
+      identity: { doi: '10.1000/abc', reportNumber: 'NASA/TM 2024-1234', isbn: '9780306406157' },
       expected: [
         crossrefDoiUrl('10.1000/abc'),
         dataciteDoiUrl('10.1000/abc'),
@@ -258,18 +259,18 @@ describe('lookupRecords', () => {
       ],
     },
     {
-      label: 'keeps arXiv ID lookup ahead of reportNumber',
-      identity: { arxivId: '2301.00001', reportNumber: 'NASA/TM 2024-1234' },
+      label: 'keeps arXiv ID lookup ahead of reportNumber and skips ISBN',
+      identity: { arxivId: '2301.00001', reportNumber: 'NASA/TM 2024-1234', isbn: '9780306406157' },
       expected: [arxivIdUrl('2301.00001')],
     },
     {
-      label: 'prefers PMID when PMID and PMCID are both present',
-      identity: { pmid: '12345678', pmcid: 'PMC123456', reportNumber: 'NASA/TM 2024-1234' },
+      label: 'prefers PMID when PMID and PMCID are both present and skips ISBN',
+      identity: { pmid: '12345678', pmcid: 'PMC123456', reportNumber: 'NASA/TM 2024-1234', isbn: '9780306406157' },
       expected: [pubmedIdUrl('12345678')],
     },
     {
-      label: 'keeps PMCID lookup when PMID is absent',
-      identity: { pmcid: 'PMC123456', reportNumber: 'NASA/TM 2024-1234' },
+      label: 'keeps PMCID lookup when PMID is absent and skips ISBN',
+      identity: { pmcid: 'PMC123456', reportNumber: 'NASA/TM 2024-1234', isbn: '9780306406157' },
       expected: [pmcSearchUrl('PMC123456')],
     },
     {
@@ -281,6 +282,32 @@ describe('lookupRecords', () => {
         arxivSearchUrl('A technical report', 5),
         dataciteQueryUrl('NASA/TM 2024-1234'),
       ],
+    },
+    {
+      label: 'runs title, report-number and ISBN searches independently',
+      identity: { title: 'A book', reportNumber: 'NUREG/CR-1234', isbn: '9780306406157' },
+      expected: [
+        crossrefSearchUrl('A book', 5),
+        openalexSearchUrl('A book', 5),
+        arxivSearchUrl('A book', 5),
+        dataciteQueryUrl('NUREG/CR-1234'),
+        openlibraryIsbnUrl('9780306406157'),
+      ],
+    },
+    {
+      label: 'runs title and ISBN searches independently',
+      identity: { title: 'A book', isbn: '9780306406157' },
+      expected: [
+        crossrefSearchUrl('A book', 5),
+        openalexSearchUrl('A book', 5),
+        arxivSearchUrl('A book', 5),
+        openlibraryIsbnUrl('9780306406157'),
+      ],
+    },
+    {
+      label: 'runs an ISBN-only lookup',
+      identity: { isbn: '9780306406157' },
+      expected: [openlibraryIsbnUrl('9780306406157')],
     },
     {
       label: 'keeps title searches when no identifier is present',
@@ -296,14 +323,40 @@ describe('lookupRecords', () => {
   })
 
   it.each([
-    { label: 'ISBN', identity: { isbn: '9780306406157' } },
+    { label: 'invalid ISBN-13', identity: { isbn: '9780306406156' } },
+    { label: 'invalid ISBN-10', identity: { isbn: '0306406153' } },
     { label: 'URL', identity: { url: 'https://example.org/report' } },
   ])('does not search from $label alone', async ({ identity }) => {
     expect(await requestedUrls(identity)).toEqual([])
   })
+
+  it.each([
+    { label: 'hyphenated ISBN-13', identity: { isbn: '978-0 306-40615-7' }, normalized: '9780306406157' },
+    { label: 'hyphenated ISBN-10', identity: { isbn: '0-306-40615-2' }, normalized: '0306406152' },
+  ])('normalizes $label before searching', async ({ identity, normalized }) => {
+    expect(await requestedUrls(identity)).toEqual([openlibraryIsbnUrl(normalized)])
+  })
 })
 
 describe('verifyCandidate', () => {
+  it('does not self-verify an ISBN-only Open Library candidate', async () => {
+    const book = JSON.stringify({
+      'ISBN:9780306406157': {
+        title: 'A misleading book title',
+        authors: [{ name: 'An Unrelated Author' }],
+        publish_date: '2024',
+        identifiers: { openlibrary: ['OL123M'] },
+        key: '/books/OL123M',
+      },
+    })
+    const fetcher = routed([{ match: 'openlibrary.org/api/books', reply: () => respond(200, book) }])
+    const outcome = await verifyCandidate({ isbn: '9780306406157' }, { fetcher, retries: 0 })
+
+    expect(outcome.records).toHaveLength(1)
+    expect(outcome.report.status).not.toBe('verified')
+    expect(outcome.report.passed).toBe(0)
+  })
+
   it('verifies a work that two sources confirm', async () => {
     const fetcher = routed([
       { match: 'api.crossref.org', reply: () => respond(200, crossrefEnvelope) },

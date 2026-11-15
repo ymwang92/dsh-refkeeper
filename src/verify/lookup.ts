@@ -20,6 +20,7 @@ import {
   dataciteQueryUrl,
   openalexDoiUrl,
   openalexSearchUrl,
+  openlibraryIsbnUrl,
   parsePmcSearchUid,
   parsePmcSummaryPmid,
   parsePubMedSummary,
@@ -30,6 +31,7 @@ import {
 } from './clients.ts'
 import type { BodyBasis } from './clients.ts'
 import { judgeCandidate } from './judge.ts'
+import { isValidIsbn10, isValidIsbn13 } from '../core/identifiers.ts'
 import type { Candidate } from '../core/candidates.ts'
 import type { SourceId, SourceRecord, VerificationReport } from './types.ts'
 
@@ -303,6 +305,7 @@ function tasksFor(identity: LookupIdentity, mailto: string | undefined): SourceT
   const doi = identity.doi?.trim()
   const arxivId = identity.arxivId?.trim()
   const reportNumber = identity.reportNumber?.trim()
+  const isbn = identity.isbn?.replace(/[-\s]/gu, '')
   const title = identity.title?.trim()
   const hasPubMedId = pmid !== undefined && pmid !== ''
   const hasPmcId = pmcid !== undefined && pmcid !== ''
@@ -336,6 +339,14 @@ function tasksFor(identity: LookupIdentity, mailto: string | undefined): SourceT
     !hasPubMedId && !hasPmcId
   ) {
     tasks.push({ source: 'datacite', url: dataciteQueryUrl(reportNumber, contact), basis: 'search' })
+  }
+  if (
+    isbn !== undefined && (isValidIsbn10(isbn) || isValidIsbn13(isbn)) &&
+    (doi === undefined || doi === '') &&
+    (arxivId === undefined || arxivId === '') &&
+    !hasPubMedId && !hasPmcId
+  ) {
+    tasks.push({ source: 'openlibrary', url: openlibraryIsbnUrl(isbn, contact), basis: 'id' })
   }
   return tasks
 }

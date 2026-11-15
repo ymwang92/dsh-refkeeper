@@ -5,8 +5,9 @@
  * here, so the judgement can be tested exhaustively against fixtures and the
  * HTTP clients can be tested separately by parsing canned payloads.
  */
-/** The authoritative registries this plugin trusts. */
-export type SourceId = 'crossref' | 'openalex' | 'arxiv' | 'datacite' | 'pubmed';
+/** The known verification registries; plugin extensions may add other sources. */
+export declare const SOURCE_IDS: readonly ["crossref", "openalex", "arxiv", "datacite", "pubmed"];
+export type SourceId = (typeof SOURCE_IDS)[number] | (string & {});
 /** One work as a registry reported it, normalized to the fields we compare. */
 export interface SourceRecord {
   readonly source: SourceId;
@@ -304,6 +305,12 @@ export declare function diceBigrams(a: string, b: string): number;
  * the stored author or journal name.
  */
 export declare function stripMarkup(input: string): string;
+/**
+ * Normalize a personal author name to family-first form while preserving
+ * already-comma-separated names. Corporate names must be recognized by the
+ * caller before using this helper.
+ */
+export declare function formatAuthorName(input: string): string;
 /** Truncate to `limit` characters, appending `…` when it actually cut. */
 export declare function clip(input: string, limit: number): string;
 /** Annotation text with meta-commentary removed; empty string means "leave the field out". */

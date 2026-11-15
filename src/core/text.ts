@@ -99,6 +99,20 @@ export function stripMarkup(input: string): string {
     .replace(/[\s*]+$/u, '')
 }
 
+/**
+ * Normalize a personal author name to family-first form while preserving
+ * already-comma-separated names. Corporate names must be recognized by the
+ * caller before using this helper.
+ */
+export function formatAuthorName(input: string): string {
+  const cleaned = collapseSpace(input)
+  if (cleaned === '' || cleaned.includes(',')) return cleaned
+  const words = cleaned.split(' ')
+  if (words.length < 2) return cleaned
+  const surname = words.pop() ?? ''
+  return `${surname}, ${words.join(' ')}`
+}
+
 /** Truncate to `limit` characters, appending `…` when it actually cut. */
 export function clip(input: string, limit: number): string {
   return input.length <= limit ? input : `${input.slice(0, Math.max(0, limit - 1))}…`
