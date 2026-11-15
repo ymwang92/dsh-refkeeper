@@ -31,6 +31,10 @@
       "default": "./lib/index.js"
     },
     "./client": "./lib/client.js",
+    "./core": {
+      "types": "./lib/public-core.d.ts",
+      "default": "./lib/public-core.js"
+    },
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"
   },

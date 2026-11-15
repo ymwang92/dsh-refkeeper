@@ -6,7 +6,7 @@ import { defineConfig } from 'tsdown'
  * that wrapper is easier to own directly than to coax out of a bundler plugin.
  */
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: ['src/index.ts', 'src/public-core.ts'],
   outDir: 'lib',
   format: ['esm'],
   platform: 'node',
