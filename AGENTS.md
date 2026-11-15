@@ -243,10 +243,9 @@ verifyCandidate({ pmid: '25882522' })   → verified 3/3
 
 ### ★ `lib/` 是 git 跟踪的构建产物，改了 `src/` 必须重新 build 并提交 `lib/` ★
 
-`lib/index.js`（宿主侧）与 `lib/client.js`（客户端侧）都在版本控制里，
-`npm run build` 会重新生成它们。**`dsh plugin add github:ymwang92/dsh-refkeeper`
-装的是仓库本身，`npm` 包里带的也是这两个文件** —— 源码改了而构建产物没跟上，
-用户拿到的就是旧功能。
+`lib/index.js`（宿主入口）、`lib/client.js`（客户端入口）及 `tsdown` 输出的
+同目录共享 chunks 都在版本控制里，`npm run build` 会重新生成它们。**插件和 npm 包
+包含整个 `lib/` 目录** —— 源码改了而构建产物没跟上，用户拿到的就是旧功能。
 
 2026-11-10 导出层那批改动就踩了这个：源码改对了、测试也过了，
 但 `lib/index.js` 被还原成了改动前的版本，导出层的功能没有进到发布产物里。
@@ -254,11 +253,17 @@ verifyCandidate({ pmid: '25882522' })   → verified 3/3
 **判断方法**：
 
 ```sh
-grep -cE 'PMID: |PMC: ' lib/index.js     # 改了什么，这里就该有几处
+grep -rcE 'PMID: |PMC: ' lib/    # 逐文件统计全部构建产物，不假定代码仍在 lib/index.js
 ```
 
 **每次改完 `src/` 都要**：`npm run build` → 确认 `git status` 里 `lib/` 是 M →
 提交时把它一起 `git add`。
+
+### 当前阶段：tsdown 分块构建产物（2026-11-15）
+
+- `tsdown` 可能把共享实现拆到 `lib/judge-<hash>.js` 等带 hash 的同目录 chunk；hash 名会随内容变化。构建产物门禁应扫描整个 `lib/`，不要固定检查 `lib/index.js` 或某个 chunk 名。
+- `lib/index.js` 通过相对路径导入同目录 chunk；`package.json` 的 `type` 为 `module`，宿主必须以 ESM 方式加载入口及其 chunk。
+- `7502de5` 的提交说明把 `choose` 数量写错：按门禁使用的区分大小写 `grep -c 'choose'`，`lib/index.js` 在提取前后均为 15；实际门禁检查 `lib/client.js`，结果为 0。`--choose` 与 `--choose-dir` 是合法的宿主命令参数，不构成门禁例外。
 
 **① URL 构造器永远不 throw。** 标识符解析不了就是**查不到**（服务器返 404，fetch 层接住），
 不是抛错。新增 registry 时照 `crossrefDoiUrl` 的样子写。
