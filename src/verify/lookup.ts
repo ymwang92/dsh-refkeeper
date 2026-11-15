@@ -17,6 +17,7 @@ import {
   crossrefDoiUrl,
   crossrefSearchUrl,
   dataciteDoiUrl,
+  dataciteQueryUrl,
   openalexDoiUrl,
   openalexSearchUrl,
   parsePmcSearchUid,
@@ -289,6 +290,9 @@ export interface LookupIdentity {
   readonly arxivId?: string | undefined
   readonly pmid?: string | undefined
   readonly pmcid?: string | undefined
+  readonly reportNumber?: string | undefined
+  readonly isbn?: string | undefined
+  readonly url?: string | undefined
   readonly title?: string | undefined
 }
 
@@ -298,6 +302,7 @@ function tasksFor(identity: LookupIdentity, mailto: string | undefined): SourceT
   const pmcid = identity.pmcid?.trim()
   const doi = identity.doi?.trim()
   const arxivId = identity.arxivId?.trim()
+  const reportNumber = identity.reportNumber?.trim()
   const title = identity.title?.trim()
   const hasPubMedId = pmid !== undefined && pmid !== ''
   const hasPmcId = pmcid !== undefined && pmcid !== ''
@@ -323,6 +328,14 @@ function tasksFor(identity: LookupIdentity, mailto: string | undefined): SourceT
       { source: 'openalex', url: openalexSearchUrl(title, 5, contact), basis: 'search' },
       { source: 'arxiv', url: arxivSearchUrl(title, 5), basis: 'search' },
     )
+  }
+  if (
+    reportNumber !== undefined && reportNumber !== '' &&
+    (doi === undefined || doi === '') &&
+    (arxivId === undefined || arxivId === '') &&
+    !hasPubMedId && !hasPmcId
+  ) {
+    tasks.push({ source: 'datacite', url: dataciteQueryUrl(reportNumber, contact), basis: 'search' })
   }
   return tasks
 }
@@ -475,6 +488,9 @@ export interface VerificationClaim {
   readonly arxivId?: string | undefined
   readonly pmid?: string | undefined
   readonly pmcid?: string | undefined
+  readonly reportNumber?: string | undefined
+  readonly isbn?: string | undefined
+  readonly url?: string | undefined
 }
 
 /** Look the candidate up and judge it. The only network entry point in M2. */
@@ -490,6 +506,9 @@ export async function verifyCandidate(
     arxivId: input.arxivId ?? '',
     pmid: input.pmid ?? '',
     pmcid: input.pmcid ?? '',
+    reportNumber: input.reportNumber ?? '',
+    isbn: input.isbn ?? '',
+    url: input.url ?? '',
   }
   const lookup = await lookupRecords(
     {
@@ -497,6 +516,9 @@ export async function verifyCandidate(
       arxivId: candidate.arxivId,
       pmid: candidate.pmid,
       pmcid: candidate.pmcid,
+      reportNumber: candidate.reportNumber,
+      isbn: candidate.isbn,
+      url: candidate.url,
       title: candidate.title,
     },
     options,
@@ -504,8 +526,10 @@ export async function verifyCandidate(
   // Identifier-only lookups (a bare DOI/arXiv id) carry no claim to compare
   // against, so the matched record becomes the claim. Without this, a perfectly
   // resolvable DOI would score 0/3 and land in the ⚠ region for the wrong reason.
+  const hasExistingIdentifier =
+    candidate.doi !== '' || candidate.arxivId !== '' || candidate.pmid !== '' || candidate.pmcid !== ''
   const claim =
-    candidate.title.trim() === '' && lookup.records.length > 0
+    candidate.title.trim() === '' && hasExistingIdentifier && lookup.records.length > 0
       ? {
           ...candidate,
           title: lookup.records[0]?.title ?? '',

@@ -390,7 +390,7 @@ export interface StoreCommandDeps {
    * before the bibliographic fields were parsed (or captured from a bare DOI).
    */
   readonly resolveIdentifiers?:
-    | ((doi: string, arxivId: string, pmid: string, pmcid: string) => Promise<SourceRecord | undefined>)
+    | ((doi: string, arxivId: string, pmid: string, pmcid: string, reportNumber: string, isbn: string, url: string) => Promise<SourceRecord | undefined>)
     | undefined
 }
 
@@ -1446,10 +1446,13 @@ export async function enrichReferences(
   ): Promise<{ readonly next: StoredReference; readonly filled: readonly string[] } | undefined> => {
     const doi = ref.identifiers.doi ?? ''
     const arxiv = ref.identifiers.arxiv ?? ''
-    if (doi === '' && arxiv === '') return undefined
+    const reportNumber = ref.identifiers.reportNumber ?? ''
+    const isbn = ref.identifiers.isbn ?? ''
+    const url = ref.url ?? ''
+    if (doi === '' && arxiv === '' && reportNumber === '') return undefined
     let record: SourceRecord | undefined
     try {
-      record = await resolve(doi, arxiv, '', '')
+      record = await resolve(doi, arxiv, '', '', reportNumber, isbn, url)
     } catch {
       record = undefined
     }

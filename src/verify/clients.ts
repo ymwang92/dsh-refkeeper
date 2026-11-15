@@ -84,6 +84,13 @@ export function crossrefSearchUrl(query: string, rows = 5, options?: ContactOpti
   )
 }
 
+export function dataciteQueryUrl(query: string, options?: ContactOptions): string {
+  return withMailto(
+    `https://api.datacite.org/dois?query=${encodeURIComponent(query)}&page[size]=5`,
+    options,
+  )
+}
+
 /** One item from `message.items[]` or `message` for a single-DOI lookup. */
 export function parseCrossrefWork(raw: unknown): SourceRecord | undefined {
   if (!isRecord(raw)) return undefined
@@ -600,6 +607,22 @@ export function parseSourceBody(source: SourceId, basis: BodyBasis, body: string
   }
   if (source === 'datacite') {
     const raw = jsonEnvelope(source, body)
+    if (basis === 'search') {
+      const results = raw['data']
+      if (!Array.isArray(results)) throw new SourceBodyError(source, 'missing data[]')
+      const records: SourceRecord[] = []
+      for (const item of results) {
+        if (!isRecord(item) || !isRecord(item['attributes'])) {
+          throw new SourceBodyError(source, 'search response contains unreadable results')
+        }
+        const record = parseDataciteWork({ data: item })
+        if (record === undefined) {
+          throw new SourceBodyError(source, 'search response contains unreadable results')
+        }
+        records.push(record)
+      }
+      return records
+    }
     const data = isRecord(raw['data']) ? raw['data'] : raw
     if (!isRecord(data['attributes'])) throw new SourceBodyError(source, 'missing data.attributes')
     const record = parseDataciteWork(raw)

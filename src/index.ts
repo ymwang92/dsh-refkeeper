@@ -486,14 +486,17 @@ function storeDeps(cwd: string, signal?: AbortSignal): StoreCommandDeps {
     // RIS `N1`, annotated.md `⚑ manual`), so the switch is safe to flip later,
     // but not before the GUI can show that label to the user.
     allowManualConfirm: false,
-    resolveIdentifiers: async (doi, arxivId, pmid, pmcid) => {
-      if (doi === '' && arxivId === '' && pmid === '' && pmcid === '') return undefined
+    resolveIdentifiers: async (doi, arxivId, pmid, pmcid, reportNumber, isbn, url) => {
+      if (doi === '' && arxivId === '' && pmid === '' && pmcid === '' && reportNumber === '') return undefined
       const outcome = await verifyCandidate(
         {
           ...(doi === '' ? {} : { doi }),
           ...(arxivId === '' ? {} : { arxivId }),
           ...(pmid === '' ? {} : { pmid }),
           ...(pmcid === '' ? {} : { pmcid }),
+          ...(reportNumber === '' ? {} : { reportNumber }),
+          ...(isbn === '' ? {} : { isbn }),
+          ...(url === '' ? {} : { url }),
         },
         { cache: verifyCache },
       )
@@ -568,9 +571,12 @@ export const refSaveTool = defineTool({
     },
     doi: { type: 'string', description: 'DOI without the https://doi.org/ prefix.' },
     arxivId: { type: 'string', description: 'arXiv identifier, e.g. 2401.01234.' },
-    isbn: { type: 'string' },
-    reportNumber: { type: 'string' },
-    url: { type: 'string' },
+    isbn: { type: 'string', description: 'ISBN for books. On its own it cannot be verified — supply a title so the registries can be searched.' },
+    reportNumber: {
+      type: 'string',
+      description: 'Technical report number, e.g. NUREG/CR-1234, PB123456. On its own it cannot be verified — supply a title, or the DOI if the report has one.',
+    },
+    url: { type: 'string', description: 'Landing page URL. A URL carrying a DOI or arXiv id is resolved from it; one that does not cannot be verified.' },
     container: { type: 'string', description: 'Journal, conference, publisher or report series.' },
     volume: { type: 'string' },
     issue: { type: 'string' },
@@ -732,9 +738,12 @@ export const refCaptureTool = defineTool({
     },
     doi: { type: 'string', description: 'DOI without the https://doi.org/ prefix.' },
     arxivId: { type: 'string', description: 'arXiv identifier, e.g. 2401.01234 or 2401.01234v2.' },
-    isbn: { type: 'string', description: 'ISBN for books.' },
-    reportNumber: { type: 'string', description: 'Technical report number, e.g. NUREG/CR-1234, PB123456.' },
-    url: { type: 'string', description: 'Canonical URL when no persistent identifier exists.' },
+    isbn: { type: 'string', description: 'ISBN for books. On its own it cannot be verified — supply a title so the registries can be searched.' },
+    reportNumber: {
+      type: 'string',
+      description: 'Technical report number, e.g. NUREG/CR-1234, PB123456. On its own it cannot be verified — supply a title, or the DOI if the report has one.',
+    },
+    url: { type: 'string', description: 'Landing page URL. A URL carrying a DOI or arXiv id is resolved from it; one that does not cannot be verified.' },
     container: { type: 'string', description: 'Journal, conference, publisher or report series name.' },
     volume: { type: 'string' },
     issue: { type: 'string' },
@@ -793,7 +802,7 @@ export const refCaptureTool = defineTool({
         chars: 0,
         truncated: false,
         candidatesJson: '[]',
-        note: 'Rejected: supply at least one of title, doi, arxivId, isbn, reportNumber or url. A reference with no identity cannot be verified or deduped.',
+        note: 'Rejected: supply at least one of title, doi, arxivId, isbn, reportNumber or url. isbn, reportNumber and url identify a work but cannot be looked up on their own — add a title, or a DOI where the work has one.',
       }
     }
 
@@ -1002,6 +1011,9 @@ function mount(ctx: Context) {
                             arxivId: candidate.arxivId,
                             ...(candidate.pmid === undefined ? {} : { pmid: candidate.pmid }),
                             ...(candidate.pmcid === undefined ? {} : { pmcid: candidate.pmcid }),
+                            ...(candidate.reportNumber === undefined ? {} : { reportNumber: candidate.reportNumber }),
+                            ...(candidate.isbn === undefined ? {} : { isbn: candidate.isbn }),
+                            ...(candidate.url === undefined ? {} : { url: candidate.url }),
                           },
                           { cache: verifyCache },
                         )

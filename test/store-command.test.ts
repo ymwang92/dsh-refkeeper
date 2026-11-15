@@ -823,6 +823,38 @@ describe('enrich', () => {
     expect(enriched?.authors.map((author) => author.family)).toEqual(['Example'])
   })
 
+  it('forwards report number, ISBN, and top-level URL to the resolver', async () => {
+    const reportNumber = 'NASA/TM 2024-1234'
+    const isbn = '9780306406157'
+    const url = 'https://example.org/nasa-report'
+    const reference = coerceReference(
+      {
+        title: 'A NASA technical report',
+        type: 'report',
+        authors: [{ literal: 'National Aeronautics and Space Administration' }],
+        year: 2024,
+        identifiers: { reportNumber, isbn },
+        url,
+      },
+      NOW,
+    )
+    if (!reference) throw new Error('fixture did not coerce')
+    await seedStore([reference])
+
+    const calls: (readonly string[])[] = []
+    const result = await runStoreCommand('enrich', {
+      workspace,
+      now: () => NOW,
+      resolveIdentifiers: async (...args) => {
+        calls.push(args)
+        return undefined
+      },
+    })
+
+    expect(result.kind).toBe('success')
+    expect(calls).toEqual([['', '', '', '', reportNumber, isbn, url]])
+  })
+
   it('rebases resolver results over concurrent edits and additions', async () => {
     let signalResolverStarted!: () => void
     const resolverStarted = new Promise<void>((resolve) => {

@@ -1,6 +1,18 @@
 import { describe, expect, it } from 'vitest'
+import {
+  arxivIdUrl,
+  arxivSearchUrl,
+  crossrefDoiUrl,
+  crossrefSearchUrl,
+  dataciteDoiUrl,
+  dataciteQueryUrl,
+  openalexDoiUrl,
+  openalexSearchUrl,
+  pmcSearchUrl,
+  pubmedIdUrl,
+} from '../src/verify/clients.ts'
 import { LookupCache, lookupRecords, verifyCandidate } from '../src/verify/lookup.ts'
-import type { Fetcher, HttpResult } from '../src/verify/lookup.ts'
+import type { Fetcher, HttpResult, LookupIdentity } from '../src/verify/lookup.ts'
 
 const crossrefEnvelope = JSON.stringify({
   message: {
@@ -36,6 +48,16 @@ function routed(routes: readonly { match: string; reply: () => Promise<HttpResul
     }
     return respond(404, 'not found')
   }
+}
+
+async function requestedUrls(identity: LookupIdentity): Promise<string[]> {
+  const seen: string[] = []
+  const fetcher: Fetcher = async (url) => {
+    seen.push(url)
+    return respond(404, 'not found')
+  }
+  await lookupRecords(identity, { fetcher, retries: 0, cache: new LookupCache() })
+  return seen
 }
 
 const candidate = {
@@ -224,6 +246,61 @@ describe('lookupRecords', () => {
     expect(lookup.errors).toHaveLength(3)
     expect(lookup.timedOut).toBe(false)
   })
+
+  it.each([
+    {
+      label: 'preserves DOI registry order',
+      identity: { doi: '10.1000/abc', reportNumber: 'NASA/TM 2024-1234' },
+      expected: [
+        crossrefDoiUrl('10.1000/abc'),
+        dataciteDoiUrl('10.1000/abc'),
+        openalexDoiUrl('10.1000/abc'),
+      ],
+    },
+    {
+      label: 'keeps arXiv ID lookup ahead of reportNumber',
+      identity: { arxivId: '2301.00001', reportNumber: 'NASA/TM 2024-1234' },
+      expected: [arxivIdUrl('2301.00001')],
+    },
+    {
+      label: 'prefers PMID when PMID and PMCID are both present',
+      identity: { pmid: '12345678', pmcid: 'PMC123456', reportNumber: 'NASA/TM 2024-1234' },
+      expected: [pubmedIdUrl('12345678')],
+    },
+    {
+      label: 'keeps PMCID lookup when PMID is absent',
+      identity: { pmcid: 'PMC123456', reportNumber: 'NASA/TM 2024-1234' },
+      expected: [pmcSearchUrl('PMC123456')],
+    },
+    {
+      label: 'runs title and report-number searches independently',
+      identity: { title: 'A technical report', reportNumber: 'NASA/TM 2024-1234' },
+      expected: [
+        crossrefSearchUrl('A technical report', 5),
+        openalexSearchUrl('A technical report', 5),
+        arxivSearchUrl('A technical report', 5),
+        dataciteQueryUrl('NASA/TM 2024-1234'),
+      ],
+    },
+    {
+      label: 'keeps title searches when no identifier is present',
+      identity: { title: 'A technical report' },
+      expected: [
+        crossrefSearchUrl('A technical report', 5),
+        openalexSearchUrl('A technical report', 5),
+        arxivSearchUrl('A technical report', 5),
+      ],
+    },
+  ])('$label', async ({ identity, expected }) => {
+    expect(await requestedUrls(identity)).toEqual(expected)
+  })
+
+  it.each([
+    { label: 'ISBN', identity: { isbn: '9780306406157' } },
+    { label: 'URL', identity: { url: 'https://example.org/report' } },
+  ])('does not search from $label alone', async ({ identity }) => {
+    expect(await requestedUrls(identity)).toEqual([])
+  })
 })
 
 describe('verifyCandidate', () => {
@@ -260,6 +337,42 @@ describe('verifyCandidate', () => {
     expect(outcome.report.status).toBe('unverified')
     expect(outcome.report.reasons).toEqual(expect.arrayContaining(['source-error']))
     expect(outcome.report.reasons).not.toContain('no-source-hit')
+  })
+
+  it('does not self-verify a report-number-only DataCite hit', async () => {
+    const reportNumber = 'NASA/TM 2024-1234'
+    const seen: string[] = []
+    const reportSearch = JSON.stringify({
+      data: [
+        {
+          id: '10.1234/nasa.tm.2024.1234',
+          type: 'dois',
+          attributes: {
+            doi: '10.1234/nasa.tm.2024.1234',
+            titles: [{ title: 'A technical report' }],
+            creators: [{ name: 'National Aeronautics and Space Administration' }],
+            publicationYear: 2024,
+            publisher: 'NASA',
+            types: { resourceTypeGeneral: 'Report', resourceType: 'Technical Report' },
+            url: 'https://example.org/report',
+          },
+        },
+      ],
+    })
+    const fetcher: Fetcher = async (url) => {
+      seen.push(url)
+      return url.includes('api.datacite.org') ? respond(200, reportSearch) : respond(404, 'not found')
+    }
+
+    const outcome = await verifyCandidate(
+      { title: '', authors: [], reportNumber },
+      { fetcher, retries: 0, cache: new LookupCache() },
+    )
+
+    expect(seen).toEqual([dataciteQueryUrl(reportNumber)])
+    expect(outcome.records).toHaveLength(1)
+    expect(outcome.report.status).not.toBe('verified')
+    expect(outcome.report.passed).toBe(0)
   })
 
   it('uses arXiv id_list for preprints instead of a title search', async () => {

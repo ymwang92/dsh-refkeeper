@@ -4,6 +4,7 @@ import {
   crossrefDoiUrl,
   crossrefSearchUrl,
   dataciteDoiUrl,
+  dataciteQueryUrl,
   openalexDoiUrl,
   openalexSearchUrl,
   parseArxivFeed,
@@ -12,6 +13,7 @@ import {
   parseDataciteWork,
   parseOpenAlexSearch,
   parseOpenAlexWork,
+  parseSourceBody,
   SOURCE_ORDER,
 } from '../src/verify/clients.ts'
 
@@ -88,6 +90,14 @@ describe('URL construction', () => {
     expect(arxivSearchUrl('all:attention')).toContain('search_query=all%3Aattention')
   })
 
+  it('encodes DataCite report-number queries and appends contact details', () => {
+    const query = 'NASA/TM 2024-1234'
+    expect(dataciteQueryUrl(query)).toBe('https://api.datacite.org/dois?query=NASA%2FTM%202024-1234&page[size]=5')
+    expect(dataciteQueryUrl(query, { mailto: 'me@example.org' })).toBe(
+      'https://api.datacite.org/dois?query=NASA%2FTM%202024-1234&page[size]=5&mailto=me%40example.org',
+    )
+  })
+
   it('orders sources crossref, openalex, arxiv, datacite, pubmed', () => {
     expect(SOURCE_ORDER).toEqual(['crossref', 'openalex', 'arxiv', 'datacite', 'pubmed'])
   })
@@ -161,6 +171,17 @@ describe('DataCite parsing', () => {
 
   it('returns nothing without a data envelope', () => {
     expect(parseDataciteWork({})).toBeUndefined()
+  })
+
+  it('parses search results and accepts a valid empty result list', () => {
+    expect(parseSourceBody('datacite', 'search', JSON.stringify({ data: [DATACITE_WORK.data] }))).toHaveLength(1)
+    expect(parseSourceBody('datacite', 'search', JSON.stringify({ data: [] }))).toEqual([])
+  })
+
+  it('rejects unreadable search results', () => {
+    expect(() => parseSourceBody('datacite', 'search', JSON.stringify({ data: [{ attributes: { types: {} } }] }))).toThrow(
+      'search response contains unreadable results',
+    )
   })
 })
 
