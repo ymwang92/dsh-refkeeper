@@ -109,6 +109,9 @@ function identifiers(raw: Record<string, unknown>): Record<string, string> {
     ['pmid', 'pmid'],
     ['pmcid', 'pmcid'],
     ['isbn', 'isbn'],
+    ['lccn', 'lccn'],
+    ['oclc', 'oclc'],
+    ['openlibraryId', 'openlibraryId'],
     ['reportNumber', 'reportNumber'],
   ]
   for (const [from, to] of sources) {
@@ -118,6 +121,9 @@ function identifiers(raw: Record<string, unknown>): Record<string, string> {
     const normalized =
       to === 'pmid' ? text.replace(/\s+/gu, '')
       : to === 'pmcid' ? text.replace(/\s+/gu, '').toUpperCase()
+      : to === 'lccn' ? text.trim().toLowerCase()
+      : to === 'oclc' ? text.trim()
+      : to === 'openlibraryId' ? text.trim().toUpperCase()
       : text
     if (normalized) out[to] = normalized
   }

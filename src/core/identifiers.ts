@@ -8,7 +8,17 @@
  */
 
 /** What kind of identifier a hit pins down. */
-export type IdentifierKind = 'doi' | 'arxiv' | 'pmid' | 'pmcid' | 'isbn' | 'report' | 'url'
+export type IdentifierKind =
+  | 'doi'
+  | 'arxiv'
+  | 'pmid'
+  | 'pmcid'
+  | 'isbn'
+  | 'lccn'
+  | 'oclc'
+  | 'openlibrary'
+  | 'report'
+  | 'url'
 
 /** One identifier occurrence inside the scanned text. */
 export interface IdentifierHit {
@@ -199,6 +209,36 @@ export function extractIdentifiers(text: string): IdentifierHit[] {
         confidence: 0.95,
       })
       continue
+    }
+    const pathname = new URL(raw).pathname
+    const openLibraryHost = host === 'openlibrary.org' || host === 'www.openlibrary.org'
+    if (openLibraryHost) {
+      const match = /^\/books\/(OL[A-Z0-9]+)(?:\/|$)/iu.exec(pathname)
+      if (match?.[1] !== undefined) {
+        push(hits, seen, { kind: 'openlibrary', value: match[1].toUpperCase(), raw, host, confidence: 0.9 })
+        continue
+      }
+    }
+    const worldcatHost =
+      host === 'worldcat.org' || host === 'www.worldcat.org' || host === 'search.worldcat.org'
+    if (worldcatHost) {
+      const oclc = /(?:^|\/)oclc\/(\d+)(?:\/|$)/iu.exec(pathname)
+      if (oclc?.[1] !== undefined) {
+        push(hits, seen, { kind: 'oclc', value: oclc[1], raw, host, confidence: 0.9 })
+        continue
+      }
+      const title = /^\/title\/(\d+)\/?$/u.exec(pathname)
+      if (title?.[1] !== undefined) {
+        push(hits, seen, { kind: 'oclc', value: title[1], raw, host, confidence: 0.9 })
+        continue
+      }
+    }
+    if (host === 'lccn.loc.gov' || host === 'www.lccn.loc.gov') {
+      const lccn = /^\/(\d+(?:-\d+)?)(?:\/|$)/u.exec(pathname)
+      if (lccn?.[1] !== undefined) {
+        push(hits, seen, { kind: 'lccn', value: lccn[1], raw, host, confidence: 0.9 })
+        continue
+      }
     }
     push(hits, seen, {
       kind: 'url',

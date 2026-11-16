@@ -224,6 +224,62 @@ describe('extractIdentifiers', () => {
     expect(hits[0]).toMatchObject({ kind: 'url', confidence: 0.3 })
   })
 
+  it('extracts Open Library IDs only from book URLs and preserves the full URL', () => {
+    const urls = [
+      ['https://openlibrary.org/books/OL123M?ref=home#edition', 'OL123M'],
+      ['https://www.openlibrary.org/books/OL456W', 'OL456W'],
+    ] as const
+    for (const [url, value] of urls) {
+      const hits = extractIdentifiers(url)
+      expect(hits).toEqual([
+        { kind: 'openlibrary', value, raw: url, host: new URL(url).hostname, confidence: 0.9 },
+      ])
+    }
+  })
+
+  it('extracts WorldCat OCLC numbers from record paths and exact numeric title URLs', () => {
+    const urls = [
+      ['https://www.worldcat.org/oclc/123456789?foo=1#record', '123456789'],
+      ['https://worldcat.org/record/oclc/555666777?source=book', '555666777'],
+      ['https://search.worldcat.org/title/987654321?query=book#results', '987654321'],
+    ] as const
+    for (const [url, value] of urls) {
+      const hits = extractIdentifiers(url)
+      expect(hits).toEqual([
+        { kind: 'oclc', value, raw: url, host: new URL(url).hostname, confidence: 0.9 },
+      ])
+    }
+  })
+
+  it('extracts LCCNs from the first LOC path segment', () => {
+    const urls = [
+      ['https://lccn.loc.gov/2001023456?foo=1#about', '2001023456', 'lccn.loc.gov'],
+      ['https://lccn.loc.gov/2001-023456/about/', '2001-023456', 'lccn.loc.gov'],
+      ['https://www.lccn.loc.gov/2007-12345', '2007-12345', 'www.lccn.loc.gov'],
+    ] as const
+    for (const [url, value, host] of urls) {
+      const hits = extractIdentifiers(url)
+      expect(hits).toEqual([{ kind: 'lccn', value, raw: url, host, confidence: 0.9 }])
+    }
+  })
+
+  it('does not infer book identifiers from unrelated or malformed URL paths', () => {
+    const urls = [
+      'https://example.com/books/OL123M',
+      'https://openlibrary.org/authors/OL123A',
+      'https://fake.openlibrary.org/books/OL123M',
+      'https://worldcat.org/search?q=12345',
+      'https://search.worldcat.org/title/abc123',
+      'https://search.worldcat.org/title/12345/editions',
+      'https://fake.worldcat.org/oclc/12345',
+      'https://lccn.loc.gov/not-a-number/2001023456',
+      'https://fake.lccn.loc.gov/2001023456',
+    ]
+    for (const url of urls) {
+      expect(extractIdentifiers(url).map((hit) => hit.kind)).toEqual(['url'])
+    }
+  })
+
   it('dedupes the same identifier seen twice', () => {
     expect(kinds('10.1000/xyz and again 10.1000/XYZ')).toEqual(['doi:10.1000/xyz'])
   })

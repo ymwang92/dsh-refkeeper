@@ -123,6 +123,9 @@ export function bibtexFields(ref: StoredReference): Array<[string, string]> {
     ref.verification.status === 'manual' ? MANUAL_NOTE : '',
     ref.identifiers.pmid ? `PMID: ${ref.identifiers.pmid}` : '',
     ref.identifiers.pmcid ? `PMC: ${ref.identifiers.pmcid}` : '',
+    ref.identifiers.lccn ? `LCCN: ${ref.identifiers.lccn}` : '',
+    ref.identifiers.oclc ? `OCLC: ${ref.identifiers.oclc}` : '',
+    ref.identifiers.openlibraryId ? `Open Library: ${ref.identifiers.openlibraryId}` : '',
   ].filter((part) => part !== '')
   if (noteParts.length > 0) push('note', escapeBibtex(noteParts.join(' ')))
   return fields

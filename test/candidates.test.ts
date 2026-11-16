@@ -155,6 +155,23 @@ describe('mergeCandidates', () => {
     const merged = mergeCandidates(a, b)
     expect(merged.authors).toEqual(['A'])
   })
+
+  it('retains link identifiers when rekeying to a book identifier', () => {
+    const current = candidateFromModel({ title: 'A Linked Book', type: 'book' })
+    const incoming = candidateFromModel({
+      title: 'A Linked Book',
+      type: 'book',
+      lccn: '2024-00123',
+      oclc: '123456789',
+      openlibraryId: 'ol654321m',
+    })
+
+    const merged = mergeCandidates(current, incoming)
+    expect(merged.key).toBe('lccn:2024-00123')
+    expect(merged.lccn).toBe('2024-00123')
+    expect(merged.oclc).toBe('123456789')
+    expect(merged.openlibraryId).toBe('OL654321M')
+  })
 })
 
 describe('report candidate confidence', () => {
@@ -250,13 +267,27 @@ describe('identity requirement', () => {
     expect(candidates).toHaveLength(1)
     expect(candidates[0]?.key.startsWith('title:')).toBe(true)
   })
+
+  it('attaches LCCN, OCLC and Open Library IDs from links on an APA citation line', () => {
+    const candidates = extractCandidates([{
+      seq: 5,
+      text: 'Miller, A. (2024). A study of linked books. Example Press. https://lccn.loc.gov/2024-00123 https://www.worldcat.org/title/123456789 https://openlibrary.org/books/OL123M',
+    }])
+    expect(candidates).toHaveLength(1)
+    expect(candidates[0]).toMatchObject({
+      type: 'book',
+      lccn: '2024-00123',
+      oclc: '123456789',
+      openlibraryId: 'OL123M',
+    })
+  })
 })
 
 describe('tool output is opt-in', () => {
   const toolOutput = {
     seq: 9,
     role: 'tool' as const,
-    text: 'found 10.1000/abc and arXiv:2401.01234; PMID: 12345678 and PMCID: PMC1234567; see also Zhang, S. (2024). A Title. Journal, 1(2), 3-4. and https://example.com/x and https://www.nature.com/articles/abc',
+    text: 'found 10.1000/abc and arXiv:2401.01234; PMID: 12345678 and PMCID: PMC1234567; see also Zhang, S. (2024). A Title. Journal, 1(2), 3-4. and https://example.com/x and https://www.nature.com/articles/abc and https://openlibrary.org/books/OL123M?ref=tool#edition https://www.worldcat.org/title/123456789?view=full https://lccn.loc.gov/2024-00123?source=tool',
   }
 
   it('excludes tool output by default', () => {
@@ -269,6 +300,12 @@ describe('tool output is opt-in', () => {
     expect(candidates.map((candidate) => candidate.arxivId)).toContain('2401.01234')
     expect(candidates.map((candidate) => candidate.pmid)).toContain('12345678')
     expect(candidates.map((candidate) => candidate.pmcid)).toContain('PMC1234567')
+    expect(candidates.some((candidate) => candidate.type === 'book' && candidate.openlibraryId === 'OL123M')).toBe(true)
+    expect(candidates.some((candidate) => candidate.type === 'book' && candidate.oclc === '123456789')).toBe(true)
+    expect(candidates.some((candidate) => candidate.type === 'book' && candidate.lccn === '2024-00123')).toBe(true)
+    expect(candidates.map((candidate) => candidate.url)).not.toContain('https://openlibrary.org/books/OL123M?ref=tool#edition')
+    expect(candidates.map((candidate) => candidate.url)).not.toContain('https://www.worldcat.org/title/123456789?view=full')
+    expect(candidates.map((candidate) => candidate.url)).not.toContain('https://lccn.loc.gov/2024-00123?source=tool')
     expect(candidates.map((candidate) => candidate.url)).toContain('https://www.nature.com/articles/abc')
     expect(candidates.map((candidate) => candidate.url)).not.toContain('https://example.com/x')
     expect(candidates.map((candidate) => candidate.title)).not.toContain('A Title')

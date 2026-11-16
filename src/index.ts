@@ -572,6 +572,9 @@ export const refSaveTool = defineTool({
     doi: { type: 'string', description: 'DOI without the https://doi.org/ prefix.' },
     arxivId: { type: 'string', description: 'arXiv identifier, e.g. 2401.01234.' },
     isbn: { type: 'string', description: 'ISBN for books. On its own it cannot be verified — supply a title so the registries can be searched.' },
+    lccn: { type: 'string', description: 'Library of Congress Control Number for a book; stored as an identifier, not verification evidence.' },
+    oclc: { type: 'string', description: 'WorldCat OCLC number for a book; stored as an identifier, not verification evidence.' },
+    openlibraryId: { type: 'string', description: 'Open Library book ID (e.g. OL123M); stored as an identifier, not verification evidence.' },
     reportNumber: {
       type: 'string',
       description: 'Technical report number, e.g. NUREG/CR-1234, PB123456. On its own it cannot be verified — supply a title, or the DOI if the report has one.',
@@ -643,6 +646,9 @@ export const refSaveTool = defineTool({
       doi: args.doi,
       arxiv: args.arxivId,
       isbn: args.isbn,
+      lccn: args.lccn,
+      oclc: args.oclc,
+      openlibraryId: args.openlibraryId,
       reportNumber: args.reportNumber,
     }
     const withIds = {
@@ -722,7 +728,7 @@ export const refExportTool = defineTool({
 export const refCaptureTool = defineTool({
   name: 'ref_capture',
   description:
-    'Capture a bibliographic reference from the current conversation. Pass the fields you can ground in the conversation (title, authors, year, DOI, arXiv id, ISBN, report number, container, pages); fields you omit are left for regex extraction and later verification. With scope="turn"|"lastN"|"all" the result is merged with every reference found in that conversation window. This tool only previews candidates; `/refs capture --save` or ref_save verifies and stores them.',
+    'Capture a bibliographic reference from the current conversation. Pass the fields you can ground in the conversation (title, authors, year, DOI, arXiv id, ISBN, LCCN, OCLC, Open Library ID, report number, container, pages); fields you omit are left for regex extraction. LCCN, OCLC and Open Library IDs are stored as identifiers only and are not verification evidence. With scope="turn"|"lastN"|"all" the result is merged with every reference found in that conversation window. This tool only previews candidates; `/refs capture --save` or ref_save verifies and stores them.',
   parameters: {
     title: { type: 'string', description: 'Work title, in the language it appears in the conversation.' },
     authors: {
@@ -739,6 +745,9 @@ export const refCaptureTool = defineTool({
     doi: { type: 'string', description: 'DOI without the https://doi.org/ prefix.' },
     arxivId: { type: 'string', description: 'arXiv identifier, e.g. 2401.01234 or 2401.01234v2.' },
     isbn: { type: 'string', description: 'ISBN for books. On its own it cannot be verified — supply a title so the registries can be searched.' },
+    lccn: { type: 'string', description: 'Library of Congress Control Number for a book; stored as an identifier, not verification evidence.' },
+    oclc: { type: 'string', description: 'WorldCat OCLC number for a book; stored as an identifier, not verification evidence.' },
+    openlibraryId: { type: 'string', description: 'Open Library book ID (e.g. OL123M); stored as an identifier, not verification evidence.' },
     reportNumber: {
       type: 'string',
       description: 'Technical report number, e.g. NUREG/CR-1234, PB123456. On its own it cannot be verified — supply a title, or the DOI if the report has one.',
@@ -787,6 +796,9 @@ export const refCaptureTool = defineTool({
       (args.doi ?? '') !== '' ||
       (args.arxivId ?? '') !== '' ||
       (args.isbn ?? '') !== '' ||
+      (args.lccn ?? '') !== '' ||
+      (args.oclc ?? '') !== '' ||
+      (args.openlibraryId ?? '') !== '' ||
       (args.reportNumber ?? '') !== '' ||
       (args.url ?? '') !== ''
     // A window-only capture (`scope` without fields) is a lookup, not a claim:
@@ -802,7 +814,7 @@ export const refCaptureTool = defineTool({
         chars: 0,
         truncated: false,
         candidatesJson: '[]',
-        note: 'Rejected: supply at least one of title, doi, arxivId, isbn, reportNumber or url. isbn, reportNumber and url identify a work but cannot be looked up on their own — add a title, or a DOI where the work has one.',
+        note: 'Rejected: supply at least one of title, doi, arxivId, isbn, lccn, oclc, openlibraryId, reportNumber or url. isbn, reportNumber and url identify a work but cannot be looked up on their own — add a title, or a DOI where the work has one. lccn, oclc and openlibraryId are stored identifiers only, not verification evidence.',
       }
     }
 
@@ -814,6 +826,9 @@ export const refCaptureTool = defineTool({
       doi: args.doi,
       arxivId: args.arxivId,
       isbn: args.isbn,
+      lccn: args.lccn,
+      oclc: args.oclc,
+      openlibraryId: args.openlibraryId,
       reportNumber: args.reportNumber,
       url: args.url,
       container: args.container,

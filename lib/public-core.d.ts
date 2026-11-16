@@ -75,7 +75,7 @@ export interface VerificationReport {
  * distinction so later stages can decide what deserves a model round-trip.
  */
 /** What kind of identifier a hit pins down. */
-export type IdentifierKind = 'doi' | 'arxiv' | 'pmid' | 'pmcid' | 'isbn' | 'report' | 'url';
+export type IdentifierKind = 'doi' | 'arxiv' | 'pmid' | 'pmcid' | 'isbn' | 'lccn' | 'oclc' | 'openlibrary' | 'report' | 'url';
 /** One identifier occurrence inside the scanned text. */
 export interface IdentifierHit {
   readonly kind: IdentifierKind;
@@ -180,6 +180,9 @@ export interface Candidate {
   readonly arxivId: string;
   readonly pmid?: string | undefined;
   readonly pmcid?: string | undefined;
+  readonly lccn?: string | undefined;
+  readonly oclc?: string | undefined;
+  readonly openlibraryId?: string | undefined;
   readonly isbn: string;
   readonly reportNumber: string;
   readonly url: string;
@@ -198,12 +201,12 @@ export interface Candidate {
   readonly evidence: readonly number[];
 }
 /**
- * Identity of a work: DOI, arXiv, PMID, PMCID, ISBN, report number, then
- * normalized title+year, then the URL. Mirrors §5.2 of the plan.
+ * Identity of a work: DOI, arXiv, PMID, PMCID, ISBN, LCCN, OCLC, Open Library
+ * ID, report number, then normalized title+year, then the URL. Mirrors §5.2 of the plan.
  */
-export declare function dedupeKey(candidate: Pick<Candidate, 'doi' | 'arxivId' | 'pmid' | 'pmcid' | 'isbn' | 'reportNumber' | 'title' | 'year' | 'url' | 'key'>): string;
+export declare function dedupeKey(candidate: Pick<Candidate, 'doi' | 'arxivId' | 'pmid' | 'pmcid' | 'isbn' | 'lccn' | 'oclc' | 'openlibraryId' | 'reportNumber' | 'title' | 'year' | 'url' | 'key'>): string;
 /** True when a candidate can at least be named: an identifier, a title or a URL. */
-export declare function hasIdentity(candidate: Pick<Candidate, 'doi' | 'arxivId' | 'pmid' | 'pmcid' | 'isbn' | 'reportNumber' | 'title' | 'url'>): boolean;
+export declare function hasIdentity(candidate: Pick<Candidate, 'doi' | 'arxivId' | 'pmid' | 'pmcid' | 'isbn' | 'lccn' | 'oclc' | 'openlibraryId' | 'reportNumber' | 'title' | 'url'>): boolean;
 /**
  * Keep only evidence seqs that actually exist in the window that was read.
  *
@@ -226,6 +229,9 @@ export interface ModelCandidateInput {
   readonly pmid?: string | undefined;
   readonly pmcid?: string | undefined;
   readonly isbn?: string | undefined;
+  readonly lccn?: string | undefined;
+  readonly oclc?: string | undefined;
+  readonly openlibraryId?: string | undefined;
   readonly reportNumber?: string | undefined;
   readonly url?: string | undefined;
   readonly container?: string | undefined;
@@ -401,6 +407,9 @@ interface RefIdentifiers {
   readonly pmid?: string;
   readonly pmcid?: string;
   readonly isbn?: string;
+  readonly lccn?: string;
+  readonly oclc?: string;
+  readonly openlibraryId?: string;
   readonly reportNumber?: string;
 }
 interface RefProvenance {

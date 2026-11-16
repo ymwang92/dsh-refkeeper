@@ -55,7 +55,18 @@ function ref(overrides: Record<string, unknown> = {}): StoredReference {
 
 describe('store round trip', () => {
   it('writes refs/refs.json with a schema version and reads it back', async () => {
-    await saveReference(workspace, ref(), { now: NOW })
+    await saveReference(
+      workspace,
+      ref({
+        identifiers: {
+          doi: '10.1038/nature12373',
+          lccn: '2024-00123',
+          oclc: '123456789',
+          openlibraryId: 'OL654321M',
+        },
+      }),
+      { now: NOW },
+    )
     const logicalPath = join(workspace, 'refs', 'refs.json')
     const file = await readFileAtomic(logicalPath)
     const parsed = JSON.parse(file) as { schemaVersion: number; references: unknown[] }
@@ -69,7 +80,12 @@ describe('store round trip', () => {
     expect(loaded.dropped).toBe(0)
     expect(loaded.state.references).toHaveLength(1)
     expect(loaded.state.references[0]?.title).toBe('Nanometre-scale thermometry in a living cell')
-    expect(loaded.state.references[0]?.identifiers.doi).toBe('10.1038/nature12373')
+    expect(loaded.state.references[0]?.identifiers).toEqual({
+      doi: '10.1038/nature12373',
+      lccn: '2024-00123',
+      oclc: '123456789',
+      openlibraryId: 'OL654321M',
+    })
   })
 
   it('replaces instead of duplicating when the identity repeats', async () => {
@@ -338,6 +354,63 @@ describe('reference identity', () => {
     )
     expect(ref?.identifiers).toEqual({ arxiv: '1706.03762', isbn: '9780306406157', reportNumber: 'NUREG-1150' })
     expect(ref?.id).toBe('arxiv:1706.03762')
+  })
+
+  it('normalizes link identifiers in flat and nested shapes', () => {
+    const flat = coerceReference(
+      {
+        title: 'Flat book',
+        lccn: ' 2024-00123 ',
+        oclc: ' 123456789 ',
+        openlibraryId: 'ol654321m',
+      },
+      now,
+    )
+    expect(flat?.identifiers).toEqual({
+      lccn: '2024-00123',
+      oclc: '123456789',
+      openlibraryId: 'OL654321M',
+    })
+    expect(flat?.id).toBe('lccn:2024-00123')
+
+    const nested = coerceReference(
+      {
+        title: 'Nested book',
+        identifiers: { lccn: '2025-00001', oclc: '000123', openlibraryId: 'ol42m' },
+        lccn: '2020-00002',
+        oclc: '9',
+        openlibraryId: 'OL99M',
+      },
+      now,
+    )
+    expect(nested?.identifiers).toEqual({
+      lccn: '2025-00001',
+      oclc: '000123',
+      openlibraryId: 'OL42M',
+    })
+  })
+
+  it('prioritizes ISBN, then LCCN, OCLC and Open Library before report numbers', () => {
+    const withIsbn = coerceReference(
+      { title: 'Book', year: 2024, identifiers: { isbn: '9780306406157', lccn: '2024-1', oclc: '123', openlibraryId: 'OL1M', reportNumber: 'R1' } },
+      now,
+    )
+    const withLccn = coerceReference(
+      { title: 'Book', year: 2024, identifiers: { lccn: '2024-1', oclc: '123', openlibraryId: 'OL1M', reportNumber: 'R1' } },
+      now,
+    )
+    const withOclc = coerceReference(
+      { title: 'Book', year: 2024, identifiers: { oclc: '123', openlibraryId: 'OL1M', reportNumber: 'R1' } },
+      now,
+    )
+    const withOpenLibrary = coerceReference(
+      { title: 'Book', year: 2024, identifiers: { openlibraryId: 'ol1m', reportNumber: 'R1' } },
+      now,
+    )
+    expect(withIsbn?.id).toBe('isbn:9780306406157')
+    expect(withLccn?.id).toBe('lccn:2024-1')
+    expect(withOclc?.id).toBe('oclc:123')
+    expect(withOpenLibrary?.id).toBe('openlibrary:OL1M')
   })
 
   it('prefers the nested identifiers object when both shapes are present', () => {

@@ -42,6 +42,9 @@ export interface Candidate {
   readonly arxivId: string
   readonly pmid?: string | undefined
   readonly pmcid?: string | undefined
+  readonly lccn?: string | undefined
+  readonly oclc?: string | undefined
+  readonly openlibraryId?: string | undefined
   readonly isbn: string
   readonly reportNumber: string
   readonly url: string
@@ -71,15 +74,18 @@ function firstNonNull<T>(...values: readonly (T | undefined)[]): T | undefined {
 }
 
 /**
- * Identity of a work: DOI, arXiv, PMID, PMCID, ISBN, report number, then
- * normalized title+year, then the URL. Mirrors §5.2 of the plan.
+ * Identity of a work: DOI, arXiv, PMID, PMCID, ISBN, LCCN, OCLC, Open Library
+ * ID, report number, then normalized title+year, then the URL. Mirrors §5.2 of the plan.
  */
-export function dedupeKey(candidate: Pick<Candidate, 'doi' | 'arxivId' | 'pmid' | 'pmcid' | 'isbn' | 'reportNumber' | 'title' | 'year' | 'url' | 'key'>): string {
+export function dedupeKey(candidate: Pick<Candidate, 'doi' | 'arxivId' | 'pmid' | 'pmcid' | 'isbn' | 'lccn' | 'oclc' | 'openlibraryId' | 'reportNumber' | 'title' | 'year' | 'url' | 'key'>): string {
   if (candidate.doi !== '') return `doi:${candidate.doi}`
   if (candidate.arxivId !== '') return `arxiv:${candidate.arxivId}`
   if (candidate.pmid !== undefined && candidate.pmid !== '') return `pmid:${candidate.pmid}`
   if (candidate.pmcid !== undefined && candidate.pmcid !== '') return `pmcid:${candidate.pmcid}`
   if (candidate.isbn !== '') return `isbn:${candidate.isbn}`
+  if (candidate.lccn !== undefined && candidate.lccn !== '') return `lccn:${candidate.lccn}`
+  if (candidate.oclc !== undefined && candidate.oclc !== '') return `oclc:${candidate.oclc}`
+  if (candidate.openlibraryId !== undefined && candidate.openlibraryId !== '') return `openlibrary:${candidate.openlibraryId}`
   if (candidate.reportNumber !== '') return `report:${candidate.reportNumber}`
   // A blank title must not become `title:|2024`: that key collides with every
   // other untitled work in the same year and makes dedupe actively wrong.
@@ -90,13 +96,16 @@ export function dedupeKey(candidate: Pick<Candidate, 'doi' | 'arxivId' | 'pmid' 
 }
 
 /** True when a candidate can at least be named: an identifier, a title or a URL. */
-export function hasIdentity(candidate: Pick<Candidate, 'doi' | 'arxivId' | 'pmid' | 'pmcid' | 'isbn' | 'reportNumber' | 'title' | 'url'>): boolean {
+export function hasIdentity(candidate: Pick<Candidate, 'doi' | 'arxivId' | 'pmid' | 'pmcid' | 'isbn' | 'lccn' | 'oclc' | 'openlibraryId' | 'reportNumber' | 'title' | 'url'>): boolean {
   return (
     candidate.doi !== '' ||
     candidate.arxivId !== '' ||
     candidate.pmid !== undefined && candidate.pmid !== '' ||
     candidate.pmcid !== undefined && candidate.pmcid !== '' ||
     candidate.isbn !== '' ||
+    candidate.lccn !== undefined && candidate.lccn !== '' ||
+    candidate.oclc !== undefined && candidate.oclc !== '' ||
+    candidate.openlibraryId !== undefined && candidate.openlibraryId !== '' ||
     candidate.reportNumber !== '' ||
     titleKey(candidate.title) !== '' ||
     candidate.url !== ''
@@ -146,6 +155,9 @@ export function candidateFromIdentifier(hit: IdentifierHit, seq: number): Candid
     arxivId: hit.kind === 'arxiv' ? hit.value : '',
     ...(hit.kind === 'pmid' ? { pmid: hit.value } : {}),
     ...(hit.kind === 'pmcid' ? { pmcid: hit.value.toUpperCase() } : {}),
+    ...(hit.kind === 'lccn' ? { lccn: hit.value } : {}),
+    ...(hit.kind === 'oclc' ? { oclc: hit.value } : {}),
+    ...(hit.kind === 'openlibrary' ? { openlibraryId: hit.value } : {}),
     isbn: hit.kind === 'isbn' ? hit.value : '',
     reportNumber: hit.kind === 'report' ? hit.value : '',
     url: hit.kind === 'url' ? hit.value : '',
@@ -159,6 +171,9 @@ function typeForIdentifier(kind: IdentifierHit['kind']): ItemType {
     case 'arxiv':
       return 'preprint'
     case 'isbn':
+    case 'lccn':
+    case 'oclc':
+    case 'openlibrary':
       return 'book'
     case 'report':
       return 'report'
@@ -177,13 +192,20 @@ export function candidateFromCitation(hit: CitationHit, seq: number, identifiers
     identifiers.find((identifier) => identifier.kind === kind)?.value ?? ''
   const pmid = attached('pmid')
   const pmcid = attached('pmcid').toUpperCase()
-  const base = emptyCandidate(hit.type, 'citation', hit.confidence)
+  const lccn = attached('lccn')
+  const oclc = attached('oclc')
+  const openlibraryId = attached('openlibrary')
+  const isBook = lccn !== '' || oclc !== '' || openlibraryId !== ''
+  const base = emptyCandidate(isBook ? 'book' : hit.type, 'citation', hit.confidence)
   const filled: Candidate = {
     ...base,
     doi: hit.doi !== '' ? hit.doi : attached('doi'),
     arxivId: attached('arxiv'),
     ...(pmid === '' ? {} : { pmid }),
     ...(pmcid === '' ? {} : { pmcid }),
+    ...(lccn === '' ? {} : { lccn }),
+    ...(oclc === '' ? {} : { oclc }),
+    ...(openlibraryId === '' ? {} : { openlibraryId }),
     isbn: attached('isbn'),
     reportNumber: attached('report'),
     title: hit.title,
@@ -214,6 +236,9 @@ export interface ModelCandidateInput {
   readonly pmid?: string | undefined
   readonly pmcid?: string | undefined
   readonly isbn?: string | undefined
+  readonly lccn?: string | undefined
+  readonly oclc?: string | undefined
+  readonly openlibraryId?: string | undefined
   readonly reportNumber?: string | undefined
   readonly url?: string | undefined
   readonly container?: string | undefined
@@ -232,16 +257,23 @@ export interface ModelCandidateInput {
  * whether the work exists. Only verification (M2) can raise that.
  */
 export function candidateFromModel(input: ModelCandidateInput): Candidate {
-  const base = emptyCandidate(input.type ?? 'journalArticle', 'model', 0.9)
   const authors = (input.authors ?? []).map((author) => collapseSpace(author)).filter((author) => author !== '')
   const pmid = (input.pmid ?? '').trim()
   const pmcid = (input.pmcid ?? '').trim().toUpperCase()
+  const lccn = (input.lccn ?? '').trim()
+  const oclc = (input.oclc ?? '').trim()
+  const openlibraryId = (input.openlibraryId ?? '').trim().toUpperCase()
+  const bookIdPresent = /^\d+(?:-\d+)?$/u.test(lccn) || /^\d+$/u.test(oclc) || /^OL[A-Z0-9]+$/u.test(openlibraryId)
+  const base = emptyCandidate(input.type ?? (bookIdPresent ? 'book' : 'journalArticle'), 'model', 0.9)
   const filled: Candidate = {
     ...base,
     doi: normalizeDoi(input.doi ?? ''),
     arxivId: normalizeArxiv(input.arxivId ?? ''),
     ...( /^\d{6,8}$/u.test(pmid) ? { pmid } : {}),
     ...( /^PMC\d+$/u.test(pmcid) ? { pmcid } : {}),
+    ...( /^\d+(?:-\d+)?$/u.test(lccn) ? { lccn } : {}),
+    ...( /^\d+$/u.test(oclc) ? { oclc } : {}),
+    ...( /^OL[A-Z0-9]+$/u.test(openlibraryId) ? { openlibraryId } : {}),
     isbn: normalizeIsbn(input.isbn ?? ''),
     reportNumber: collapseSpace(input.reportNumber ?? ''),
     url: (input.url ?? '').trim(),
@@ -289,6 +321,9 @@ export function mergeCandidates(current: Candidate, incoming: Candidate): Candid
     pmid: pickOptional(current.pmid, incoming.pmid),
     pmcid: pickOptional(current.pmcid, incoming.pmcid),
     isbn: pick(current.isbn, incoming.isbn),
+    lccn: pickOptional(current.lccn, incoming.lccn),
+    oclc: pickOptional(current.oclc, incoming.oclc),
+    openlibraryId: pickOptional(current.openlibraryId, incoming.openlibraryId),
     reportNumber: pick(current.reportNumber, incoming.reportNumber),
     url: pick(current.url, incoming.url),
     title: pick(current.title, incoming.title),
@@ -403,7 +438,16 @@ export function extractCandidates(
     if (source.role === 'tool') {
       if (options.includeTools !== true) continue
       for (const identifier of identifiers) {
-        if (identifier.kind !== 'doi' && identifier.kind !== 'arxiv' && identifier.kind !== 'pmid' && identifier.kind !== 'pmcid' && identifier.kind !== 'url') continue
+        if (
+          identifier.kind !== 'doi' &&
+          identifier.kind !== 'arxiv' &&
+          identifier.kind !== 'pmid' &&
+          identifier.kind !== 'pmcid' &&
+          identifier.kind !== 'lccn' &&
+          identifier.kind !== 'oclc' &&
+          identifier.kind !== 'openlibrary' &&
+          identifier.kind !== 'url'
+        ) continue
         if (identifier.kind === 'url' && identifier.confidence < 0.7) continue
         absorb(candidateFromIdentifier(identifier, source.seq))
       }

@@ -44,6 +44,9 @@ export interface RefIdentifiers {
   readonly pmid?: string
   readonly pmcid?: string
   readonly isbn?: string
+  readonly lccn?: string
+  readonly oclc?: string
+  readonly openlibraryId?: string
   readonly reportNumber?: string
 }
 
@@ -157,10 +160,13 @@ export function emptyQuarantine(now: string): QuarantineState {
 export function referenceIdentityKey(
   ref: Pick<StoredReference, 'identifiers' | 'title' | 'year'>,
 ): string {
-  const { doi, arxiv, isbn, reportNumber } = ref.identifiers
+  const { doi, arxiv, isbn, lccn, oclc, openlibraryId, reportNumber } = ref.identifiers
   if (doi?.trim()) return `doi:${doi.trim().toLowerCase()}`
   if (arxiv?.trim()) return `arxiv:${arxiv.trim().toLowerCase()}`
   if (isbn?.trim()) return `isbn:${isbn.replace(/[-\s]/gu, '').toLowerCase()}`
+  if (lccn?.trim()) return `lccn:${lccn.trim().toLowerCase()}`
+  if (oclc?.trim()) return `oclc:${oclc.trim()}`
+  if (openlibraryId?.trim()) return `openlibrary:${openlibraryId.trim().toUpperCase()}`
   if (reportNumber?.trim()) return `report:${reportNumber.trim().toLowerCase()}`
   return `title:${stripMarkup(ref.title).normalize('NFKC').toLowerCase().replace(/\s+/gu, ' ').trim()}|${ref.year ?? ''}`
 }

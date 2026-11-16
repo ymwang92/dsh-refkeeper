@@ -49,6 +49,9 @@ export function renderRisEntry(ref: StoredReference): string {
   if (ref.identifiers.reportNumber) rows.push(['AN', ref.identifiers.reportNumber])
   if (ref.identifiers.pmid) rows.push(['AN', `PMID:${ref.identifiers.pmid}`])
   if (ref.identifiers.pmcid) rows.push(['AN', `PMC:${ref.identifiers.pmcid}`])
+  if (ref.identifiers.lccn) rows.push(['AN', `LCCN:${ref.identifiers.lccn}`])
+  if (ref.identifiers.oclc) rows.push(['AN', `OCLC:${ref.identifiers.oclc}`])
+  if (ref.identifiers.openlibraryId) rows.push(['AN', `Open Library:${ref.identifiers.openlibraryId}`])
   if (ref.url) rows.push(['UR', ref.url])
   const annotation = ref.annotation
   if (annotation?.summary) rows.push(['AB', annotation.summary])
