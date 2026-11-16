@@ -87,6 +87,24 @@ describe('bibtex export', () => {
     ])
   })
 
+  it('writes all book-link identifiers together in one note', () => {
+    const entry = renderBibtex([
+      ref({
+        type: 'book',
+        title: 'A Book of Examples',
+        identifiers: {
+          lccn: '81001630',
+          oclc: '9264983',
+          openlibraryId: 'OL4256224M',
+        },
+      }),
+    ])
+    const notes = entry.split('\n').filter((line) => line.startsWith('  note = '))
+    expect(notes).toEqual([
+      '  note = {LCCN: 81001630 OCLC: 9264983 Open Library: OL4256224M}',
+    ])
+  })
+
   it('labels a manual entry so a .bib reader cannot mistake it for verified', () => {
     const manual = ref({ verification: { status: 'manual', checkedAt: NOW } })
     const entry = renderBibtex([manual])
@@ -116,7 +134,7 @@ describe('ris export', () => {
     expect(entry.trimEnd().endsWith('ER  -')).toBe(true)
   })
 
-  it('adds PMID and PMCID AN rows after existing identifier rows', () => {
+  it('adds PMID, PMCID and book identifier AN rows after existing identifier rows', () => {
     const entry = renderRisEntry(
       ref({
         identifiers: {
@@ -126,6 +144,9 @@ describe('ris export', () => {
           reportNumber: 'RPT-17',
           pmid: '25882522',
           pmcid: 'PMC7840891',
+          lccn: '81001630',
+          oclc: '9264983',
+          openlibraryId: 'OL4256224M',
         },
         url: 'https://example.test/reference',
       }),
@@ -138,6 +159,9 @@ describe('ris export', () => {
       'AN  - RPT-17',
       'AN  - PMID:25882522',
       'AN  - PMC:PMC7840891',
+      'AN  - LCCN:81001630',
+      'AN  - OCLC:9264983',
+      'AN  - Open Library:OL4256224M',
       'UR  - https://example.test/reference',
     ]
     const positions = expectedOrder.map((row) => rows.indexOf(row))
@@ -145,15 +169,36 @@ describe('ris export', () => {
     expect(positions).toEqual([...positions].sort((left, right) => left - right))
   })
 
-  it('omits empty PubMed identifiers and notes', () => {
+  it('omits empty PubMed and book identifiers and notes', () => {
     const reference = ref()
     const bibtex = renderBibtex([reference])
     const ris = renderRisEntry(reference)
     expect(bibtex).not.toContain('note =')
     expect(bibtex).not.toContain('PMID:')
     expect(bibtex).not.toContain('PMC:')
+    expect(bibtex).not.toContain('LCCN:')
+    expect(bibtex).not.toContain('OCLC:')
+    expect(bibtex).not.toContain('Open Library:')
     expect(ris).not.toContain('AN  - PMID:')
     expect(ris).not.toContain('AN  - PMC:')
+    expect(ris).not.toContain('AN  - LCCN:')
+    expect(ris).not.toContain('AN  - OCLC:')
+    expect(ris).not.toContain('AN  - Open Library:')
+  })
+
+  it('writes only the single present book identifier', () => {
+    const reference = ref({
+      type: 'book',
+      identifiers: { lccn: '81001630' },
+    })
+    const bibtex = renderBibtex([reference])
+    const notes = bibtex.split('\n').filter((line) => line.startsWith('  note = '))
+    expect(notes).toEqual(['  note = {LCCN: 81001630}'])
+
+    const risBookIdentifiers = renderRisEntry(reference)
+      .split('\n')
+      .filter((line) => line.startsWith('AN  - LCCN:') || line.startsWith('AN  - OCLC:') || line.startsWith('AN  - Open Library:'))
+    expect(risBookIdentifiers).toEqual(['AN  - LCCN:81001630'])
   })
 
   it('labels annotations with N1 rows', () => {
