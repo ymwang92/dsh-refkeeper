@@ -9,7 +9,7 @@
  * half-parsed, because a wrong year is worse than no entry.
  */
 
-import { normalizeDoi } from './identifiers.ts'
+import { normalizeArxiv, normalizeDoi } from './identifiers.ts'
 import { formatAuthorName, hasCjk, stripMarkup } from './text.ts'
 
 /** Recognized reference-string styles. */
@@ -38,6 +38,7 @@ export interface CitationHit {
   readonly issue: string
   readonly pages: string
   readonly doi: string
+  readonly arxivId?: string | undefined
   readonly raw: string
   readonly confidence: number
 }
@@ -595,6 +596,15 @@ function normalizeBibtexDoi(value: string): string {
   return normalizeDoi(prefix === undefined ? normalizedValue : normalizedValue.slice(prefix.length))
 }
 
+const BIBTEX_ARXIV_EPRINT = /^(?:\d{4}\.\d{4,5}|[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)?\/\d{7,8})(?:v\d+)?$/iu
+
+function normalizeBibtexArxiv(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined
+  const identifier = value.trim().replace(/^arXiv:\s*/iu, '')
+  if (!BIBTEX_ARXIV_EPRINT.test(identifier)) return undefined
+  return normalizeArxiv(identifier)
+}
+
 function parseBibtexRecord(block: BibtexBlock, macros: ReadonlyMap<string, string>): CitationHit | undefined {
   if (block.type === 'comment' || block.type === 'string' || block.type === 'preamble') return undefined
   const rawFields = parseBibtexFields(block, false)
@@ -612,6 +622,7 @@ function parseBibtexRecord(block: BibtexBlock, macros: ReadonlyMap<string, strin
   const yearMatch = yearText.match(/^((?:18|19|20|21)\d{2})(?:-(?:0[1-9]|1[0-2])|\/(?:0[1-9]|1[0-2]))?$/u)
   const year = yearMatch === null ? undefined : plausibleYear(yearMatch[1])
   const doiText = fields.get('doi') ?? ''
+  const arxivId = normalizeBibtexArxiv(fields.get('eprint'))
   return {
     style: 'bibtex',
     type: BIBTEX_TYPES[block.type] ?? 'webpage',
@@ -623,6 +634,7 @@ function parseBibtexRecord(block: BibtexBlock, macros: ReadonlyMap<string, strin
     issue: fields.get('number') ?? '',
     pages: fields.get('pages') ?? '',
     doi: doiText === '' ? '' : normalizeBibtexDoi(doiText),
+    ...(arxivId === undefined ? {} : { arxivId }),
     raw: block.raw,
     confidence: 0.9,
   }

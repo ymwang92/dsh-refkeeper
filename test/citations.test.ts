@@ -313,6 +313,25 @@ describe('BibTeX citations', () => {
     expect(hit?.style).toBe('bibtex')
   })
 
+  it.each([
+    ['modern ID', '1706.03762', '1706.03762'],
+    ['versioned modern ID', '1706.03762v5', '1706.03762'],
+    ['arXiv-prefixed modern ID', 'arXiv:1706.03762', '1706.03762'],
+    ['legacy category ID', 'math.GT/0309136', 'math.GT/0309136'],
+    ['prefixed versioned legacy ID', 'arXiv:math.GT/0309136v2', 'math.GT/0309136'],
+  ] as const)('extracts a valid BibTeX eprint (%s)', (_label, eprint, arxivId) => {
+    const hit = parseBibtexBlock(`@article{arxiv, title={A test title}, year={2024}, eprint={${eprint}}}`)
+    expect(hit?.arxivId).toBe(arxivId)
+  })
+
+  it.each(['abc', '12345'] as const)('ignores invalid eprint %s and preserves citation fields', (eprint) => {
+    const hit = parseBibtexBlock(
+      `@article{invalid, author={Ashish Vaswani}, title={Attention Is All You Need}, year={2017}, eprint={${eprint}}}`,
+    )
+    expect(hit).toMatchObject({ title: 'Attention Is All You Need', authors: ['Vaswani, Ashish'], year: 2017 })
+    expect(hit?.arxivId).toBeUndefined()
+  })
+
   it('maps article fields exactly, including nested braces and normalized authors', () => {
     const record = `@article{smith2024,
   author = {John Smith and Jane Q. Doe and {Research and Development Group}},

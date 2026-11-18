@@ -139,6 +139,7 @@ export interface CitationHit {
   readonly issue: string;
   readonly pages: string;
   readonly doi: string;
+  readonly arxivId?: string | undefined;
   readonly raw: string;
   readonly confidence: number;
 }

@@ -268,6 +268,19 @@ describe('identity requirement', () => {
     expect(candidates[0]?.key.startsWith('title:')).toBe(true)
   })
 
+  it('uses a BibTeX eprint as the candidate arXiv ID', () => {
+    const candidate = citationCandidate(
+      '@article{vaswani2017, title={Attention Is All You Need}, author={Vaswani, Ashish}, year={2017}, eprint={1706.03762}}',
+      5,
+    )
+    expect(candidate).toMatchObject({
+      title: 'Attention Is All You Need',
+      authors: ['Vaswani, Ashish'],
+      year: 2017,
+      arxivId: '1706.03762',
+    })
+  })
+
   it('attaches LCCN, OCLC and Open Library IDs from links on an APA citation line', () => {
     const candidates = extractCandidates([{
       seq: 5,

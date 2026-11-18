@@ -200,7 +200,7 @@ export function candidateFromCitation(hit: CitationHit, seq: number, identifiers
   const filled: Candidate = {
     ...base,
     doi: hit.doi !== '' ? hit.doi : attached('doi'),
-    arxivId: attached('arxiv'),
+    arxivId: hit.arxivId ?? attached('arxiv'),
     ...(pmid === '' ? {} : { pmid }),
     ...(pmcid === '' ? {} : { pmcid }),
     ...(lccn === '' ? {} : { lccn }),
