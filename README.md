@@ -4,7 +4,7 @@
 
 ![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg) [![npm](https://img.shields.io/npm/v/dsh-refkeeper.svg)](https://www.npmjs.com/package/dsh-refkeeper) [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 
-Long research conversations scatter citations across turns, tool results and summaries. dsh-refkeeper extracts references from the conversation you choose, checks their metadata against five scholarly registries, and turns them into traceable entries with annotations and BibTeX/RIS export. A registry disagreement is kept in quarantine instead of being treated as verified.
+Long research conversations scatter citations across turns, tool results and summaries. dsh-refkeeper extracts references from the conversation you choose, checks their metadata against five scholarly registries, and turns them into traceable entries with annotations and BibTeX/RIS export. DataCite can search technical report numbers, and Open Library can find book candidates from ISBNs. A lookup hit is not verification: the title, year and first-author checks still apply, and an ISBN without a title remains quarantined. A registry disagreement is kept in quarantine instead of being treated as verified.
 
 ![The capture panel in the top-right corner](docs/images/panel-en.png)
 
@@ -32,8 +32,9 @@ If this plugin saves you time, a star on GitHub helps other people find it. If y
 | PubMed | `PMID: 12345678`; `PMCID: PMC1234567` |
 | ISBN | ISBN-10 `0-306-40615-2`; ISBN-13 `978-0-306-40615-7` |
 | Report number | `NUREG-1234`; `PB123456`; `NACA 1234`; `NTRS 123456`; `AD-A123456`; `DOE/BR-123456`; `NASA/TM-2020-12345`; `EPA-600/R-14/001`; `RFC-9110` |
+| Book identifiers | LCCN `81001630` (`https://lccn.loc.gov/81001630`); OCLC `9264983` (`https://www.worldcat.org/oclc/9264983`); Open Library `OL4256224M` (`https://openlibrary.org/books/OL4256224M`) |
 
-PMID and PMCID must include their labels. An unlabeled 6–8 digit number such as `20240101` is ignored, so dates and sample IDs are not mistaken for papers. A PMCID is resolved through PMC before the PubMed lookup.
+PMID and PMCID must include their labels. An unlabeled 6–8 digit number such as `20240101` is ignored, so dates and sample IDs are not mistaken for papers. A PMCID is resolved through PMC before the PubMed lookup. For example, mentioning a book with its [Open Library page](https://openlibrary.org/books/OL4256224M) carries the book identifier into the saved reference; it does not itself verify the book.
 
 ## Supported reference formats
 
@@ -85,6 +86,8 @@ Asking the model for a `.bib` file is faster, but models make up page ranges, DO
 In DSH open **Settings → Plugins → Add plugin** and enter `dsh-refkeeper`. The package is published on npm, so this is one step and runs no build: the tarball ships the built `lib/`. Enable it for the current profile, then reload.
 
 To track the repository instead of the published version, paste the Git address `https://github.com/ymwang92/dsh-refkeeper` into the same dialog. The repository commits `lib/` too, so that route needs no build either.
+
+For host-independent citation helpers, import the pure API subpath: `import { extractIdentifiers } from 'dsh-refkeeper/core'`. It does not require DSH host APIs.
 
 ### Configuration
 

@@ -4,7 +4,7 @@
 
 ![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg) [![npm](https://img.shields.io/npm/v/dsh-refkeeper.svg)](https://www.npmjs.com/package/dsh-refkeeper) [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 
-长篇研究对话中的引文常散落在不同轮次、工具结果和摘要里。dsh-refkeeper 会从你选定的对话中提取引用，用五个学术注册表核对元数据，再整理为可追溯的文献条目并支持注解及 BibTeX/RIS 导出。注册表明确不一致的条目会留在隔离区，不会被当成已核实文献。
+长篇研究对话中的引文常散落在不同轮次、工具结果和摘要里。dsh-refkeeper 会从你选定的对话中提取引用，用五个学术注册表核对元数据，再整理为可追溯的文献条目并支持注解及 BibTeX/RIS 导出。报告号可由 DataCite 搜索，ISBN 可由 Open Library 查找图书候选；查询命中不等于核验，仍须通过标题、年份和第一作者三项比对，只有 ISBN 而没有标题的条目仍会进入隔离区。注册表明确不一致的条目也会留在隔离区，不会被当成已核实文献。
 
 ![右上角的捕获面板](docs/images/panel.png)
 
@@ -32,8 +32,9 @@
 | PubMed | `PMID: 12345678`；`PMCID: PMC1234567` |
 | ISBN | ISBN-10 `0-306-40615-2`；ISBN-13 `978-0-306-40615-7` |
 | 报告号 | `NUREG-1234`；`PB123456`；`NACA 1234`；`NTRS 123456`；`AD-A123456`；`DOE/BR-123456`；`NASA/TM-2020-12345`；`EPA-600/R-14/001`；`RFC-9110` |
+| 图书标识符 | LCCN `81001630`（`https://lccn.loc.gov/81001630`）；OCLC `9264983`（`https://www.worldcat.org/oclc/9264983`）；Open Library `OL4256224M`（`https://openlibrary.org/books/OL4256224M`） |
 
-PMID 和 PMCID 必须带标签。没有标签的 6–8 位数字（如 `20240101`）会被忽略，避免误识别日期或样本号。PMCID 会先经 PMC 交叉解析，再查询 PubMed。
+PMID 和 PMCID 必须带标签。没有标签的 6–8 位数字（如 `20240101`）会被忽略，避免误识别日期或样本号。PMCID 会先经 PMC 交叉解析，再查询 PubMed。例如，在对话中附上图书的 [Open Library 页面](https://openlibrary.org/books/OL4256224M)，该标识符会随候选写入文献记录，但链接本身不会核实图书。
 
 ## 支持的引用格式
 
@@ -83,6 +84,8 @@ BibTeX 条目可以一次贴很多条 —— 一段消息里的几个块会被�
 在 DSH 打开**设置 → 插件 → 添加插件**，输入 `dsh-refkeeper`。这个包已发布到 npm，一步装好，不跑构建（tarball 里带 `lib/`）。在当前 profile 启用后重载。
 
 想跟随仓库更新而不是锁定发布版，就在同一个输入框里填 Git 地址 `https://github.com/ymwang92/dsh-refkeeper`；仓库里也提交了 `lib/`，同样不需要构建。
+
+如果要在不依赖 DSH 宿主 API 的环境中使用纯引用处理逻辑，可从 `dsh-refkeeper/core` 导入，例如：`import { extractIdentifiers } from 'dsh-refkeeper/core'`。
 
 ### 配置
 

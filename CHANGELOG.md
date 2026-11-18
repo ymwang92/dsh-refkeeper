@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.1.6 — 2026-11-18
+
+### Added
+
+- Recognize LCCN, OCLC and Open Library identifiers from book links; retain them in saved references and exports without treating them as verification evidence.
+- Provide a host-independent `dsh-refkeeper/core` entry point for pure citation helpers such as `extractIdentifiers`.
+
+### Changed
+
+- Search DataCite by technical report number and Open Library by ISBN to find candidate records; a lookup hit is not verification and the existing title, year and first-author checks remain decisive.
+- Clarify that ISBNs without titles remain quarantined rather than being accepted from an ISBN lookup alone.
+
+### Fixed
+
+- Document the distinction between candidate discovery and verification for report numbers, ISBNs, book links and URLs.
+
+### 中文
+
+### 新增
+
+- 从图书链接识别 LCCN、OCLC 和 Open Library 标识符，并写入文献记录及导出；这些标识符不会作为核验依据。
+- 提供不依赖宿主的 `dsh-refkeeper/core` 入口，可导入 `extractIdentifiers` 等纯引用处理逻辑。
+
+### 变更
+
+- 可通过 DataCite 按报告号搜索、通过 Open Library 按 ISBN 查找候选记录；查询命中不等于核验，仍以标题、年份和第一作者的既有比对为准。
+- 明确只有 ISBN、没有标题时仍会进入隔离区，不会因 ISBN 查询命中而被接受。
+
+### 修复
+
+- 补充报告号、ISBN、图书链接和 URL 的候选发现与正式核验区别说明。
+
+Tests: 31 files / 499 tests.
+测试：31 个文件 / 499 项。
+
+---
+
 ## 0.1.5 — 2026-11-14
 
 A link that carries an identifier now yields a reference, a pasted BibTeX
