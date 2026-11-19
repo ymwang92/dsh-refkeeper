@@ -229,6 +229,46 @@ describe('saveCaptured identifier hydration', () => {
     expect(summary.entries?.[0]).toMatchObject({ status: 'quarantined' })
   })
 
+  it('resolves ISBN-only and report-number-only candidates but skips a candidate without identifiers', async () => {
+    const resolved: Candidate[] = []
+    const deps = {
+      resolveIdentifier: async (candidate: Candidate) => {
+        resolved.push(candidate)
+        return undefined
+      },
+      save: async () => ({ kind: 'success' as const }),
+    }
+    const isbnOnly: Candidate = {
+      ...identifierOnly,
+      key: 'isbn:9780306406157',
+      doi: '',
+      isbn: '9780306406157',
+    }
+    const reportNumberOnly: Candidate = {
+      ...identifierOnly,
+      key: 'report:NASA/TM-1981-1234',
+      doi: '',
+      reportNumber: 'NASA/TM-1981-1234',
+    }
+    const noIdentifiers: Candidate = {
+      ...identifierOnly,
+      key: 'title:identifier-free',
+      doi: '',
+      title: 'An identifier-free candidate',
+    }
+
+    await saveCaptured([isbnOnly], deps)
+    expect(resolved).toHaveLength(1)
+    expect(resolved[0]?.isbn).toBe('9780306406157')
+
+    await saveCaptured([reportNumberOnly], deps)
+    expect(resolved).toHaveLength(2)
+    expect(resolved[1]?.reportNumber).toBe('NASA/TM-1981-1234')
+
+    await saveCaptured([noIdentifiers], deps)
+    expect(resolved).toHaveLength(2)
+  })
+
   it('keeps the cited title but backfills the rest of a titled candidate', async () => {
     let resolverCalls = 0
     const summary = await saveCaptured(

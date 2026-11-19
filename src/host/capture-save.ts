@@ -95,15 +95,16 @@ export async function saveCaptured(
   for (const original of candidates) {
     let candidate = original
     let registry: SourceRecord | undefined
-    // Any identified candidate gets one registry pass, not just the titleless
-    // ones: a citation in the conversation usually carries a title and a DOI and
-    // nothing else, and verification already looked the record up. Discarding it
-    // left the panel's detail form empty, which read as "the capture is broken".
+    // Any candidate with a supported lookup identifier gets one resolver pass,
+    // including candidates that already carry a title. The capture panel needs
+    // the registry fields for its detail form, not only the verification result.
     if (
       candidate.doi !== '' ||
       candidate.arxivId !== '' ||
       (candidate.pmid !== undefined && candidate.pmid !== '') ||
-      (candidate.pmcid !== undefined && candidate.pmcid !== '')
+      (candidate.pmcid !== undefined && candidate.pmcid !== '') ||
+      candidate.isbn !== '' ||
+      candidate.reportNumber !== ''
     ) {
       try {
         const record = await deps.resolveIdentifier(candidate)
