@@ -4,7 +4,7 @@
  * Everything here is injectable so the whole verification path can be exercised
  * without a network: `fetcher`, clock, timeouts and cache are options. The
  * defaults are production-shaped (4s per source, 8s per verification round,
- * one retry on 429/5xx, 10-minute read cache).
+ * two retries on 429/5xx, 10-minute read cache).
  *
  * Failure policy is fail-closed: a source that errors or runs out of time is
  * recorded in `errors`/`timedOut`, and the judgement layer can only downgrade
@@ -40,6 +40,7 @@ export interface HttpResult {
   readonly ok: boolean
   readonly status: number
   readonly body: string
+  readonly headers?: { get(name: string): string | null } | undefined
 }
 
 export type Fetcher = (url: string, init: { signal?: AbortSignal }) => Promise<HttpResult>
@@ -107,7 +108,7 @@ export class LookupCache {
 
 const defaultFetcher: Fetcher = async (url, init) => {
   const response = await fetch(url, init.signal === undefined ? {} : { signal: init.signal })
-  return { ok: response.ok, status: response.status, body: await response.text() }
+  return { ok: response.ok, status: response.status, body: await response.text(), headers: response.headers }
 }
 
 function sleepMs(ms: number): Promise<void> {
@@ -233,6 +234,27 @@ interface FetchTextOptions {
   readonly signal?: AbortSignal | undefined
 }
 
+const MAX_RETRY_DELAY_MS = 4_000
+
+function retryAfterDelayMs(result: HttpResult, now: number): number | undefined {
+  const value = result.headers?.get('retry-after')?.trim()
+  if (value === undefined || value === '') return undefined
+
+  if (/^\d+$/u.test(value)) {
+    const delayMs = Number(value) * 1_000
+    return Number.isFinite(delayMs) ? delayMs : undefined
+  }
+
+  const retryAt = Date.parse(value)
+  return Number.isFinite(retryAt) ? Math.max(0, retryAt - now) : undefined
+}
+
+function fallbackRetryDelayMs(attempt: number, initialDelayMs: number): number {
+  // At the default 250ms this yields 250ms, 1s, 2s, then 4s capped.
+  const multiplier = attempt === 0 ? 1 : 2 ** (attempt + 1)
+  return Math.min(initialDelayMs * multiplier, MAX_RETRY_DELAY_MS)
+}
+
 /** GET one URL with cache, per-attempt timeout and 429/5xx retry. */
 async function fetchText(url: string, options: FetchTextOptions): Promise<string> {
   const cached = options.cache?.get(url, options.now())
@@ -240,6 +262,7 @@ async function fetchText(url: string, options: FetchTextOptions): Promise<string
 
   let lastError: unknown
   for (let attempt = 0; attempt <= options.retries; attempt += 1) {
+    let serverRetryAfterMs: number | undefined
     try {
       if (url.startsWith(NCBI_EUTILS_PREFIX)) await waitForNcbiRequest(options.signal)
       const result = await fetchWithTimeout(options.fetcher, url, options.timeoutMs, options.signal)
@@ -249,6 +272,7 @@ async function fetchText(url: string, options: FetchTextOptions): Promise<string
         throw new PermanentHttpError(result.status)
       }
       lastError = new Error(`HTTP ${String(result.status)}`)
+      serverRetryAfterMs = retryAfterDelayMs(result, options.now())
     } catch (error) {
       lastError = error
       // Timeouts, caller cancellation, and permanent statuses are final:
@@ -262,7 +286,9 @@ async function fetchText(url: string, options: FetchTextOptions): Promise<string
         throw error
       }
     }
-    if (attempt < options.retries) await options.sleep(options.retryDelayMs * (attempt + 1))
+    if (attempt < options.retries) {
+      await options.sleep(serverRetryAfterMs ?? fallbackRetryDelayMs(attempt, options.retryDelayMs))
+    }
   }
   throw lastError instanceof Error ? lastError : new Error(String(lastError))
 }
@@ -309,46 +335,37 @@ function tasksFor(identity: LookupIdentity, mailto: string | undefined): SourceT
   const title = identity.title?.trim()
   const hasPubMedId = pmid !== undefined && pmid !== ''
   const hasPmcId = pmcid !== undefined && pmcid !== ''
-  const tasks: SourceTask[] = []
-
-  if (hasPubMedId) {
-    tasks.push({ source: 'pubmed', url: pubmedIdUrl(pmid), basis: 'id' })
-  } else if (hasPmcId) {
-    tasks.push({ source: 'pubmed', url: pmcSearchUrl(pmcid), basis: 'id', pmcid })
-  }
 
   if (doi !== undefined && doi !== '') {
-    tasks.push(
+    return [
       { source: 'crossref', url: crossrefDoiUrl(doi, contact), basis: 'doi' },
       { source: 'datacite', url: dataciteDoiUrl(doi), basis: 'doi' },
       { source: 'openalex', url: openalexDoiUrl(doi, contact), basis: 'doi' },
-    )
-  } else if (arxivId !== undefined && arxivId !== '') {
-    tasks.push({ source: 'arxiv', url: arxivIdUrl(arxivId), basis: 'id' })
-  } else if (!hasPubMedId && !hasPmcId && title !== undefined && title !== '') {
-    tasks.push(
+    ]
+  }
+  if (arxivId !== undefined && arxivId !== '') {
+    return [{ source: 'arxiv', url: arxivIdUrl(arxivId), basis: 'id' }]
+  }
+  if (hasPubMedId) {
+    return [{ source: 'pubmed', url: pubmedIdUrl(pmid), basis: 'id' }]
+  }
+  if (hasPmcId) {
+    return [{ source: 'pubmed', url: pmcSearchUrl(pmcid), basis: 'id', pmcid }]
+  }
+  if (isbn !== undefined && (isValidIsbn10(isbn) || isValidIsbn13(isbn))) {
+    return [{ source: 'openlibrary', url: openlibraryIsbnUrl(isbn, contact), basis: 'id' }]
+  }
+  if (reportNumber !== undefined && reportNumber !== '') {
+    return [{ source: 'datacite', url: dataciteQueryUrl(reportNumber, contact), basis: 'search' }]
+  }
+  if (title !== undefined && title !== '') {
+    return [
       { source: 'crossref', url: crossrefSearchUrl(title, 5, contact), basis: 'search' },
       { source: 'openalex', url: openalexSearchUrl(title, 5, contact), basis: 'search' },
       { source: 'arxiv', url: arxivSearchUrl(title, 5), basis: 'search' },
-    )
+    ]
   }
-  if (
-    reportNumber !== undefined && reportNumber !== '' &&
-    (doi === undefined || doi === '') &&
-    (arxivId === undefined || arxivId === '') &&
-    !hasPubMedId && !hasPmcId
-  ) {
-    tasks.push({ source: 'datacite', url: dataciteQueryUrl(reportNumber, contact), basis: 'search' })
-  }
-  if (
-    isbn !== undefined && (isValidIsbn10(isbn) || isValidIsbn13(isbn)) &&
-    (doi === undefined || doi === '') &&
-    (arxivId === undefined || arxivId === '') &&
-    !hasPubMedId && !hasPmcId
-  ) {
-    tasks.push({ source: 'openlibrary', url: openlibraryIsbnUrl(isbn, contact), basis: 'id' })
-  }
-  return tasks
+  return []
 }
 
 /**
@@ -366,7 +383,7 @@ export async function lookupRecords(identity: LookupIdentity, options: LookupOpt
   const cache = options.cache
   const now = options.now ?? Date.now
   const sleep = options.sleep ?? sleepMs
-  const retries = options.retries ?? 1
+  const retries = options.retries ?? 2
   const retryDelayMs = options.retryDelayMs ?? 250
   const sourceTimeoutMs = options.sourceTimeoutMs ?? DEFAULT_SOURCE_TIMEOUT_MS
   const totalBudgetMs = options.totalBudgetMs ?? DEFAULT_TOTAL_BUDGET_MS

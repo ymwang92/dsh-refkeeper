@@ -37,8 +37,13 @@ const openalexWork = JSON.stringify({
   type: 'article',
 })
 
-function respond(status: number, body: string): HttpResult {
-  return { ok: status >= 200 && status < 300, status, body }
+function respond(status: number, body: string, headers?: HttpResult['headers']): HttpResult {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    body,
+    ...(headers === undefined ? {} : { headers }),
+  }
 }
 
 /** Route by URL substring; unmatched URLs 404. */
@@ -83,23 +88,72 @@ describe('lookupRecords', () => {
     expect([...lookup.answered].sort()).toEqual(['crossref', 'datacite', 'openalex'])
   })
 
-  it('retries a 429 once and then succeeds', async () => {
+  it.each([
+    { label: 'delay-seconds', value: '2', now: 0, expectedDelayMs: 2_000 },
+    {
+      label: 'HTTP-date',
+      value: 'Wed, 21 Oct 2015 07:28:03 GMT',
+      now: Date.parse('Wed, 21 Oct 2015 07:28:00 GMT'),
+      expectedDelayMs: 3_000,
+    },
+  ])('honors Retry-After as $label and then succeeds', async ({ value, now, expectedDelayMs }) => {
     let calls = 0
+    const delays: number[] = []
     const fetcher = routed([
       {
         match: 'api.crossref.org',
         reply: () => {
           calls += 1
-          return calls === 1 ? respond(429, 'slow down') : respond(200, crossrefEnvelope)
+          return calls === 1
+            ? respond(429, 'slow down', {
+                get: (name) => (name.toLowerCase() === 'retry-after' ? value : null),
+              })
+            : respond(200, crossrefEnvelope)
         },
       },
     ])
     const lookup = await lookupRecords(
       { doi: '10.1000/abc' },
-      { fetcher, retries: 1, sleep: async () => {}, cache: new LookupCache() },
+      { fetcher, retries: 1, sleep: async (ms) => { delays.push(ms) }, now: () => now, cache: new LookupCache() },
     )
     expect(calls).toBe(2)
+    expect(delays).toEqual([expectedDelayMs])
     expect(lookup.records).toHaveLength(1)
+  })
+
+  it('defaults to two retries for a persistent 429 with exponential backoff', async () => {
+    let calls = 0
+    const delays: number[] = []
+    const lookup = await lookupRecords(
+      { arxivId: '2301.00001' },
+      {
+        fetcher: async () => {
+          calls += 1
+          return respond(429, 'slow down')
+        },
+        sleep: async (ms) => { delays.push(ms) },
+        cache: new LookupCache(),
+      },
+    )
+    expect(calls).toBe(3)
+    expect(delays).toEqual([250, 1_000])
+    expect(lookup.records).toEqual([])
+    expect(lookup.errors).toHaveLength(1)
+  })
+
+  it('caps fallback backoff at four seconds', async () => {
+    const delays: number[] = []
+    await lookupRecords(
+      { arxivId: '2301.00001' },
+      {
+        fetcher: async () => respond(429, 'slow down'),
+        retries: 5,
+        retryDelayMs: 250,
+        sleep: async (ms) => { delays.push(ms) },
+        cache: new LookupCache(),
+      },
+    )
+    expect(delays).toEqual([250, 1_000, 2_000, 4_000, 4_000])
   })
 
   it('does not retry a permanent 4xx', async () => {
@@ -111,6 +165,28 @@ describe('lookupRecords', () => {
     const lookup = await lookupRecords({ doi: '10.1000/abc' }, { fetcher, retries: 2, sleep: async () => {} })
     expect(calls).toBe(3) // one attempt per source, no retries
     expect(lookup.errors).toHaveLength(3)
+  })
+
+  it('does not retry 404 and counts it as a completed source answer', async () => {
+    let calls = 0
+    const delays: number[] = []
+    const lookup = await lookupRecords(
+      { arxivId: '2301.00001' },
+      {
+        fetcher: async () => {
+          calls += 1
+          return respond(404, 'not found')
+        },
+        retries: 5,
+        sleep: async (ms) => { delays.push(ms) },
+        cache: new LookupCache(),
+      },
+    )
+    expect(calls).toBe(1)
+    expect(delays).toEqual([])
+    expect(lookup.records).toEqual([])
+    expect(lookup.errors).toEqual([])
+    expect(lookup.answered).toEqual(['arxiv'])
   })
 
   it('aborts all in-flight requests when the total lookup budget expires', async () => {
@@ -250,8 +326,16 @@ describe('lookupRecords', () => {
 
   it.each([
     {
-      label: 'preserves DOI registry order and skips ISBN when DOI exists',
-      identity: { doi: '10.1000/abc', reportNumber: 'NASA/TM 2024-1234', isbn: '9780306406157' },
+      label: 'prefers DOI registries over all lower-priority identifiers and title',
+      identity: {
+        doi: '10.1000/abc',
+        arxivId: '2301.00001',
+        pmid: '12345678',
+        pmcid: 'PMC123456',
+        reportNumber: 'NASA/TM 2024-1234',
+        isbn: '9780306406157',
+        title: 'A lower-priority title',
+      },
       expected: [
         crossrefDoiUrl('10.1000/abc'),
         dataciteDoiUrl('10.1000/abc'),
@@ -259,55 +343,71 @@ describe('lookupRecords', () => {
       ],
     },
     {
-      label: 'keeps arXiv ID lookup ahead of reportNumber and skips ISBN',
-      identity: { arxivId: '2301.00001', reportNumber: 'NASA/TM 2024-1234', isbn: '9780306406157' },
+      label: 'prefers arXiv ID over lower-priority identifiers and title',
+      identity: {
+        arxivId: '2301.00001',
+        pmid: '12345678',
+        pmcid: 'PMC123456',
+        reportNumber: 'NASA/TM 2024-1234',
+        isbn: '9780306406157',
+        title: 'A lower-priority title',
+      },
       expected: [arxivIdUrl('2301.00001')],
     },
     {
-      label: 'prefers PMID when PMID and PMCID are both present and skips ISBN',
-      identity: { pmid: '12345678', pmcid: 'PMC123456', reportNumber: 'NASA/TM 2024-1234', isbn: '9780306406157' },
+      label: 'prefers PMID over PMCID and all lower-priority identifiers and title',
+      identity: {
+        pmid: '12345678',
+        pmcid: 'PMC123456',
+        reportNumber: 'NASA/TM 2024-1234',
+        isbn: '9780306406157',
+        title: 'A lower-priority title',
+      },
       expected: [pubmedIdUrl('12345678')],
     },
     {
-      label: 'keeps PMCID lookup when PMID is absent and skips ISBN',
-      identity: { pmcid: 'PMC123456', reportNumber: 'NASA/TM 2024-1234', isbn: '9780306406157' },
+      label: 'prefers PMCID over lower-priority identifiers and title when PMID is absent',
+      identity: {
+        pmcid: 'PMC123456',
+        reportNumber: 'NASA/TM 2024-1234',
+        isbn: '9780306406157',
+        title: 'A lower-priority title',
+      },
       expected: [pmcSearchUrl('PMC123456')],
     },
     {
-      label: 'runs title and report-number searches independently',
+      label: 'prefers report-number lookup over title search',
       identity: { title: 'A technical report', reportNumber: 'NASA/TM 2024-1234' },
-      expected: [
-        crossrefSearchUrl('A technical report', 5),
-        openalexSearchUrl('A technical report', 5),
-        arxivSearchUrl('A technical report', 5),
-        dataciteQueryUrl('NASA/TM 2024-1234'),
-      ],
+      expected: [dataciteQueryUrl('NASA/TM 2024-1234')],
     },
     {
-      label: 'runs title, report-number and ISBN searches independently',
+      label: 'prefers ISBN over report number and title',
       identity: { title: 'A book', reportNumber: 'NUREG/CR-1234', isbn: '9780306406157' },
-      expected: [
-        crossrefSearchUrl('A book', 5),
-        openalexSearchUrl('A book', 5),
-        arxivSearchUrl('A book', 5),
-        dataciteQueryUrl('NUREG/CR-1234'),
-        openlibraryIsbnUrl('9780306406157'),
-      ],
+      expected: [openlibraryIsbnUrl('9780306406157')],
     },
     {
-      label: 'runs title and ISBN searches independently',
+      label: 'prefers ISBN lookup over title search',
       identity: { title: 'A book', isbn: '9780306406157' },
-      expected: [
-        crossrefSearchUrl('A book', 5),
-        openalexSearchUrl('A book', 5),
-        arxivSearchUrl('A book', 5),
-        openlibraryIsbnUrl('9780306406157'),
-      ],
+      expected: [openlibraryIsbnUrl('9780306406157')],
     },
     {
       label: 'runs an ISBN-only lookup',
       identity: { isbn: '9780306406157' },
       expected: [openlibraryIsbnUrl('9780306406157')],
+    },
+    {
+      label: 'runs a report-number-only lookup',
+      identity: { reportNumber: 'NASA/TM 2024-1234' },
+      expected: [dataciteQueryUrl('NASA/TM 2024-1234')],
+    },
+    {
+      label: 'falls back to title search for an invalid ISBN',
+      identity: { title: 'A book', isbn: '9780306406156' },
+      expected: [
+        crossrefSearchUrl('A book', 5),
+        openalexSearchUrl('A book', 5),
+        arxivSearchUrl('A book', 5),
+      ],
     },
     {
       label: 'keeps title searches when no identifier is present',
