@@ -4,7 +4,8 @@
 
 ### Added
 
-- Route PMID and PMCID lookups through PubMed and PMC search/crosswalk respectively, with bounded handling of truncated registry responses.
+- Route PMID and PMCID lookups through PubMed and PMC search/crosswalk respectively.
+- The capture result now reports whether the conversation was cut short by the length budget.
 - Recognize LCCN, OCLC and Open Library identifiers from book links; retain them in saved references and exports without treating them as verification evidence.
 - Search DataCite by technical report number and Open Library by ISBN to find candidate records; a lookup hit is not verification and the existing title, year and first-author checks remain decisive.
 - Provide a host-independent `dsh-refkeeper/core` entry point for pure citation helpers such as `extractIdentifiers`.
@@ -25,7 +26,8 @@
 
 ### 新增
 
-- PMID 与 PMCID 分别路由至 PubMed 和 PMC 搜索/交叉解析，并安全处理被截断的注册表响应。
+- PMID 与 PMCID 分别路由至 PubMed 和 PMC 搜索/交叉解析。
+- 捕获结果现在会报告会话内容是否因长度预算被截断。
 - 从图书链接识别 LCCN、OCLC 和 Open Library 标识符，并写入文献记录及导出；这些标识符不会作为核验依据。
 - 可通过 DataCite 按报告号搜索、通过 Open Library 按 ISBN 查找候选记录；查询命中不等于核验，仍须通过既有的标题、年份和第一作者核验。
 - 提供不依赖宿主的 `dsh-refkeeper/core` 入口，可导入 `extractIdentifiers` 等纯引用处理逻辑。

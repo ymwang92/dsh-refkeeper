@@ -4,7 +4,7 @@
 
 ![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg) [![npm](https://img.shields.io/npm/v/dsh-refkeeper.svg)](https://www.npmjs.com/package/dsh-refkeeper) [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 
-长篇研究对话中的引文常散落在不同轮次、工具结果和摘要里。dsh-refkeeper 会从你选定的对话中提取引用，用五个学术注册表核对元数据，再整理为可追溯的文献条目并支持注解及 BibTeX/RIS 导出。报告号可由 DataCite 搜索，ISBN 可由 Open Library 查找图书候选；查询命中不等于核验，仍须通过标题、年份和第一作者三项比对，只有 ISBN 而没有标题的条目仍会进入隔离区。注册表明确不一致的条目也会留在隔离区，不会被当成已核实文献。
+长篇研究对话中的引文常散落在不同轮次、工具结果和摘要里。dsh-refkeeper 会从你选定的对话中提取引用，用六个学术注册表核对元数据，再整理为可追溯的文献条目并支持注解及 BibTeX/RIS 导出。报告号可由 DataCite 搜索，ISBN 可由 Open Library 查找图书候选；查询命中不等于核验，仍须通过标题、年份和第一作者三项比对，只有 ISBN 而没有标题的条目仍会进入隔离区。注册表明确不一致的条目也会留在隔离区，不会被当成已核实文献。
 
 ![右上角的捕获面板](docs/images/panel.png)
 
@@ -17,7 +17,7 @@
 ## 功能
 
 - **收集引用**。范围可以是本轮、前 N 轮或整个对话。识别 DOI、arXiv 编号、PMID、PMCID、ISBN、报告号，也识别按 APA、GB/T 7714、IEEE、BibTeX、Vancouver 格式写出的参考文献行。部分历史 arXiv 分类编号（如 `math.GT/0309136`、`cs/0112017`）同样支持。
-- **对照注册表核对**。只有标题匹配、年份相差不超过一年、第一作者匹配，并且至少有一个注册表返回了记录，条目才会被接受。注册表有五个：Crossref、OpenAlex、arXiv、DataCite，加上 PubMed。
+- **对照注册表核对**。只有标题匹配、年份相差不超过一年、第一作者匹配，并且至少有一个注册表返回了记录，条目才会被接受。注册表有六个：Crossref、OpenAlex、arXiv、DataCite、PubMed，以及 Open Library。
 - **生成注解**。捕获后，由当前会话使用的模型为每条写四个字段：摘要、与本书稿的关系、一段原文引证、注意事项。引证如果没在对话里逐字出现，会被丢弃。
 - **导出**。BibTeX、RIS 或两者。导出范围可以是最近一次捕获、你勾选的条目，或整个文献库。PMID 与 PMCID 会一起写进去。
 - **说清存到哪里**。捕获完成后，面板会告诉你这次存了多少条、存在工作区的 `refs/refs.json`；下面那个「导出到」是 `.bib`/`.ris` 的输出目录，不是文献库。
@@ -72,7 +72,7 @@ BibTeX 条目可以一次贴很多条 —— 一段消息里的几个块会被�
 | | 手动复制 | 让模型生成 `.bib` | 本插件 |
 | --- | --- | --- | --- |
 | 条目从哪来 | 自己往回翻 | 模型的记忆 | 从你选定的对话里解析 |
-| 元数据是否核对 | 没有 | 没有 | Crossref、OpenAlex、arXiv、DataCite、PubMed |
+| 元数据是否核对 | 没有 | 没有 | Crossref、OpenAlex、arXiv、DataCite、PubMed、Open Library |
 | 核对不通过时 | 无 | 照样保留 | 移入 `refs/quarantine.json`，不参与导出 |
 | 编造的页码、DOI、作者 | 无 | 可能出现 | 字段取自注册表记录；无依据的字段留空 |
 | 为什么稿子里有这篇 | 丢失 | 丢失 | 注解加一句原文引证 |
@@ -146,7 +146,7 @@ BibTeX 条目可以一次贴很多条 —— 一段消息里的几个块会被�
 
 ```text
 对话文本
-   │  标识符：DOI、arXiv 编号、带标签的 PMID/PMCID、ISBN、报告号
+   │  标识符：DOI、arXiv 编号、带标签的 PMID/PMCID、ISBN、报告号、LCCN、OCLC、Open Library ID
    │  参考文献行：APA、GB/T 7714、IEEE、BibTeX、Vancouver
    ▼
 候选条目 ──► 按标识符选择来源
@@ -190,6 +190,7 @@ GB/T 7714 格式的参考文献行与 APA、IEEE、BibTeX、Vancouver 一起解�
 | 副行 | 第一作者 · 年份 · 出版物，以及没通过时的那句原因 |
 | 点条目 | 打开独立的编辑页，不挤在列表里 |
 | 编辑页的三组字段 | 标识信息（条目类型、DOI、arXiv ID、PMID、PMCID、URL）、书目信息、出版信息 |
+| 图书链接标识符 | LCCN、OCLC 和 Open Library ID 会保存并导出，但不会在面板中显示。 |
 | 条目类型 | 七种类型的下拉框；自由文本会在导出时静默失败 |
 | 手动入表 | 跳过的条目可以在这里补全元数据后入库 |
 | 导出格式 | BibTeX、RIS 或两者 |
