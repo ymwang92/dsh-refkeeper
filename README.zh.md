@@ -34,7 +34,7 @@
 | 报告号 | `NUREG-1234`；`PB123456`；`NACA 1234`；`NTRS 123456`；`AD-A123456`；`DOE/BR-123456`；`NASA/TM-2020-12345`；`EPA-600/R-14/001`；`RFC-9110` |
 | 图书标识符 | LCCN `81001630`（`https://lccn.loc.gov/81001630`）；OCLC `9264983`（`https://www.worldcat.org/oclc/9264983`）；Open Library `OL4256224M`（`https://openlibrary.org/books/OL4256224M`） |
 
-PMID 和 PMCID 必须带标签。没有标签的 6–8 位数字（如 `20240101`）会被忽略，避免误识别日期或样本号。PMCID 会先经 PMC 交叉解析，再查询 PubMed。例如，在对话中附上图书的 [Open Library 页面](https://openlibrary.org/books/OL4256224M)，该标识符会随候选写入文献记录，但链接本身不会核实图书。
+PMID 和 PMCID 必须带标签。没有标签的 6–8 位数字（如 `20240101`）会被忽略，避免误识别日期或样本号。查询按标识符选择来源：DOI 查询 Crossref、DataCite 和 OpenAlex；arXiv 编号查询 arXiv；PMID 查询 PubMed；PMCID 使用 PMC 搜索/交叉解析；ISBN 查询 Open Library；报告号查询 DataCite。只有题名时查询 Crossref、OpenAlex 和 arXiv。并发查询的来源最多为三个。例如，在对话中附上图书的 [Open Library 页面](https://openlibrary.org/books/OL4256224M)，该标识符会随候选写入文献记录，但链接本身不会核实图书。
 
 ## 支持的引用格式
 
@@ -149,8 +149,12 @@ BibTeX 条目可以一次贴很多条 —— 一段消息里的几个块会被�
    │  标识符：DOI、arXiv 编号、带标签的 PMID/PMCID、ISBN、报告号
    │  参考文献行：APA、GB/T 7714、IEEE、BibTeX、Vancouver
    ▼
-候选条目 ──► Crossref、OpenAlex、arXiv、DataCite、PubMed
-                 （尽可能并发查询；PMCID 先经 PMC 交叉解析）
+候选条目 ──► 按标识符选择来源
+                 DOI：Crossref / DataCite / OpenAlex · arXiv：arXiv
+                 PMID：PubMed · PMCID：PMC 搜索/交叉解析
+                 ISBN：Open Library · 报告号：DataCite
+                 只有题名：Crossref / OpenAlex / arXiv
+                 （并发查询的来源最多为三个）
    │
    ├─ 接受条件：标题匹配 · 年份相差 ±1 · 第一作者匹配
    │             且至少一个注册表返回记录

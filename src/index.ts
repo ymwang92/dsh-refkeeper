@@ -336,7 +336,7 @@ interface VerifyToolResult {
 export const refVerifyTool = defineTool({
   name: 'ref_verify',
   description:
-    'Verify one bibliographic claim against Crossref, OpenAlex, arXiv and DataCite before it enters the reference table. Pass the fields the user actually claimed (title, authors, year, doi, arxivId). The verdict is `verified` only when title strongly matches, year is within ±1, the first author matches AND at least one registry returns the work; `warning` (2/3), `quarantined` (0-1/3 or no registry hit) and `unverified` (registries unreachable) all belong in the ⚠ region and must not be exported. A bare DOI/arXiv id with no title is an existence check: the matched record supplies the claim.',
+    'Identifier routing across Refkeeper: DOI→Crossref/DataCite/OpenAlex; arXiv id→arXiv; PMID→PubMed; PMCID→PMC search and PMID crosswalk; ISBN→Open Library; report number→DataCite; title-only→Crossref/OpenAlex/arXiv. ISBN and report-number routes are candidate discovery only and do not count as verification evidence. At most three sources are queried concurrently. The ref_verify inputs are title, authors, year, doi, arxivId, pmid and pmcid. The verdict is `verified` only when title strongly matches, year is within ±1, the first author matches AND at least one registry returns the work; `warning` (2/3), `quarantined` (0-1/3 or no registry hit) and `unverified` (registries unreachable) all belong in the ⚠ region and must not be exported. A bare DOI/arXiv id/PMID/PMCID with no title is an existence check: the matched record supplies the claim.',
   parameters: {
     title: { type: 'string', description: 'Claimed title, as written in the conversation.' },
     authors: {
@@ -347,6 +347,8 @@ export const refVerifyTool = defineTool({
     year: { type: 'integer', description: 'Claimed publication year.' },
     doi: { type: 'string', description: 'DOI without the https://doi.org/ prefix.' },
     arxivId: { type: 'string', description: 'arXiv identifier, e.g. 2401.01234.' },
+    pmid: { type: 'string', description: 'PubMed identifier, e.g. 25882522.' },
+    pmcid: { type: 'string', description: 'PubMed Central identifier, e.g. PMC7840891.' },
   },
   output: {
     schema: verifySchema,
@@ -364,11 +366,17 @@ export const refVerifyTool = defineTool({
     },
   },
   async execute(args): Promise<VerifyToolResult> {
-    if ((args.title ?? '') === '' && (args.doi ?? '') === '' && (args.arxivId ?? '') === '') {
+    if (
+      (args.title ?? '') === '' &&
+      (args.doi ?? '') === '' &&
+      (args.arxivId ?? '') === '' &&
+      (args.pmid ?? '') === '' &&
+      (args.pmcid ?? '') === ''
+    ) {
       const report = {
         status: 'unverified',
         passed: 0,
-        note: 'Rejected: supply a title, a DOI or an arXiv id. Verification needs an identity to look up.',
+        note: 'Rejected: supply a title, a DOI, an arXiv id, a PMID or a PMCID. Verification needs an identity to look up.',
       }
       return {
         status: 'unverified',
@@ -387,6 +395,8 @@ export const refVerifyTool = defineTool({
         year: args.year,
         doi: args.doi,
         arxivId: args.arxivId,
+        pmid: args.pmid,
+        pmcid: args.pmcid,
       },
       { cache: verifyCache },
     )
@@ -781,7 +791,7 @@ export const refCaptureTool = defineTool({
         {
           type: 'text',
           text: [
-            `accepted: ${String(value.accepted)} · scope: ${value.scope} · read: ${value.readMode}`,
+            `accepted: ${String(value.accepted)} · scope: ${value.scope} · read: ${value.readMode} · truncated: ${String(value.truncated)}`,
             `candidates: ${String(candidates.length)}`,
             value.candidatesJson,
             value.note,

@@ -4,6 +4,7 @@
 
 ### Added
 
+- Route PMID and PMCID lookups through PubMed and PMC search/crosswalk respectively, with bounded handling of truncated registry responses.
 - Recognize LCCN, OCLC and Open Library identifiers from book links; retain them in saved references and exports without treating them as verification evidence.
 - Search DataCite by technical report number and Open Library by ISBN to find candidate records; a lookup hit is not verification and the existing title, year and first-author checks remain decisive.
 - Provide a host-independent `dsh-refkeeper/core` entry point for pure citation helpers such as `extractIdentifiers`.
@@ -13,6 +14,7 @@
 - Treat standard numbers such as ISO 9001, GB/T 12345 and RFC 1918 as ordinary text rather than citation numbers.
 - Normalize report numbers so `NTRS 123456`, `NTRS123456` and `Ntrs123456` represent the same record.
 - Clarify tool descriptions that ISBNs, report numbers and URLs alone are not verification evidence; an ISBN without a title remains quarantined.
+- Add an npm `prepack` hook that runs `npm run build` before packing or publishing, refreshing the generated `lib/` output.
 
 ### Fixed
 
@@ -23,6 +25,7 @@
 
 ### 新增
 
+- PMID 与 PMCID 分别路由至 PubMed 和 PMC 搜索/交叉解析，并安全处理被截断的注册表响应。
 - 从图书链接识别 LCCN、OCLC 和 Open Library 标识符，并写入文献记录及导出；这些标识符不会作为核验依据。
 - 可通过 DataCite 按报告号搜索、通过 Open Library 按 ISBN 查找候选记录；查询命中不等于核验，仍须通过既有的标题、年份和第一作者核验。
 - 提供不依赖宿主的 `dsh-refkeeper/core` 入口，可导入 `extractIdentifiers` 等纯引用处理逻辑。
@@ -32,14 +35,15 @@
 - 将 ISO 9001、GB/T 12345、RFC 1918 等标准号视为普通文本，而不是文献编号。
 - 归一报告号格式，使 `NTRS 123456`、`NTRS123456` 和 `Ntrs123456` 指向同一条记录。
 - 更新工具描述，说明 ISBN、报告号和 URL 单独都不能作为核验依据；只有 ISBN 而没有标题的条目仍会进入隔离区。
+- 新增 npm `prepack` 钩子，在打包或发布前运行 `npm run build`，刷新生成的 `lib/` 产物。
 
 ### 修复
 
 - 不再把 RFC 1918、RFC 2616、RFC 5322 等常见协议编号识别为报告号，因为它们经常出现在普通技术写作中。
 - 防止 ISO 9001、GB/T 12345、RFC 1918 等标准号冒充文献条目。
 
-Tests: 31 files / 499 tests.
-测试：31 个文件 / 499 项。
+Tests: 32 files / 518 tests.
+测试：32 个文件 / 518 项。
 
 ---
 

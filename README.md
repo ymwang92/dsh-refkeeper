@@ -34,7 +34,7 @@ If this plugin saves you time, a star on GitHub helps other people find it. If y
 | Report number | `NUREG-1234`; `PB123456`; `NACA 1234`; `NTRS 123456`; `AD-A123456`; `DOE/BR-123456`; `NASA/TM-2020-12345`; `EPA-600/R-14/001`; `RFC-9110` |
 | Book identifiers | LCCN `81001630` (`https://lccn.loc.gov/81001630`); OCLC `9264983` (`https://www.worldcat.org/oclc/9264983`); Open Library `OL4256224M` (`https://openlibrary.org/books/OL4256224M`) |
 
-PMID and PMCID must include their labels. An unlabeled 6–8 digit number such as `20240101` is ignored, so dates and sample IDs are not mistaken for papers. A PMCID is resolved through PMC before the PubMed lookup. For example, mentioning a book with its [Open Library page](https://openlibrary.org/books/OL4256224M) carries the book identifier into the saved reference; it does not itself verify the book.
+PMID and PMCID must include their labels. An unlabeled 6–8 digit number such as `20240101` is ignored, so dates and sample IDs are not mistaken for papers. Routing is identifier-specific: DOI searches Crossref, DataCite and OpenAlex; arXiv IDs search arXiv; PMID searches PubMed; PMCID uses PMC search/crosswalk; ISBN searches Open Library; and report numbers search DataCite. Title-only references search Crossref, OpenAlex and arXiv. At most three sources are queried concurrently. For example, mentioning a book with its [Open Library page](https://openlibrary.org/books/OL4256224M) carries the book identifier into the saved reference; it does not itself verify the book.
 
 ## Supported reference formats
 
@@ -151,8 +151,12 @@ conversation text
    │  identifiers: DOI, arXiv id, labeled PMID/PMCID, ISBN, report number
    │  reference lines: APA, GB/T 7714, IEEE, BibTeX, Vancouver
    ▼
-candidates ──► Crossref, OpenAlex, arXiv, DataCite, PubMed
-                 (concurrent where possible; PMCID uses a PMC crosswalk)
+candidates ──► identifier-specific sources
+                 DOI: Crossref / DataCite / OpenAlex · arXiv: arXiv
+                 PMID: PubMed · PMCID: PMC search/crosswalk
+                 ISBN: Open Library · report number: DataCite
+                 title only: Crossref / OpenAlex / arXiv
+                 (at most three sources queried concurrently)
    │
    ├─ accepted when: title matches · year within ±1 · first author matches
    │                 and at least one registry returned a record

@@ -19,8 +19,12 @@ export const VERIFY_USAGE = [
   '  /refs verify --arxiv=2301.00001',
   '  /refs verify --title="论文标题" [--year=2024] [--author=Zhang] [--json]',
   '',
-  'Checks title / year (±1) / first author against Crossref, OpenAlex, arXiv and',
-  'DataCite. Anything short of 3/3 with a real source goes to the ⚠ region.',
+  'Routes: DOI→Crossref/DataCite/OpenAlex; arXiv→arXiv; PMID→PubMed; PMCID→PMC',
+  'search + PMID crosswalk; ISBN→Open Library; report number→DataCite; title-only→',
+  'Crossref/OpenAlex/arXiv (at most three sources concurrently). PMID/PMCID are',
+  'available through ref_verify; slash-command flags above remain DOI/arXiv/title.',
+  'Checks title / year (±1) / first author; anything short of 3/3 with a real source',
+  'goes to the ⚠ region.',
 ].join('\n')
 
 export interface ParsedVerify {
