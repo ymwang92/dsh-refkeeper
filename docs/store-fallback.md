@@ -13,14 +13,18 @@ The host-side probe confirmed that `open('w')` can create and overwrite, append 
 
 ## Persistence strategy
 
-For only `refs.json`, `quarantine.json`, `annotated.md`, and `last-capture.json`, writes use immutable snapshots and a checksummed append-only journal:
+Every path first uses the standard temp+rename writer. A successful rename is the complete write and creates no snapshot or journal. Open, write, and close failures remain write errors and do not trigger fallback.
+
+A rename failure (including `EPERM`) is the only condition that activates the snapshot+journal fallback. The temporary file gets one best-effort cleanup attempt. The resolved absolute destination path is cached in-process after the first rename failure; that write falls back, and later writes to the same path go directly to snapshots without retrying rename. Other paths continue trying rename first. After process restart the cache is empty, so a path gets one rename attempt again. Writes are serialized per destination within the process.
+
+The fallback uses immutable snapshots and a checksummed append-only journal:
 
 1. Choose a snapshot version from the journal tail (up to 512 bytes) and create `file.vN` exclusively (`open(..., 'wx')`), so an existing snapshot is never truncated. If an uncommitted orphan already occupies that version, choose a random 48-bit fallback version rather than probing every intervening number.
 2. Write the full snapshot and close it. The write path does not fsync the snapshot or read it back after writing.
 3. Append a newline-terminated `{version, sha256}` record to `file.journal`; this record is the commit point. Before appending, the writer checks the last byte. If the previous tail is unterminated, it appends NUL plus newline after that tail to make the torn record invalid, then appends the new complete JSON record.
 4. Readers accept only complete newline-terminated records with a positive integer version and 64-character SHA-256. They inspect recent records from the journal tail and verify candidate snapshot hashes newest-first, skipping missing snapshots and mismatches so an older valid commit can be returned. When the tail is truncated and recent records yield no valid snapshot, the reader scans full history newest-first. If no journal commit is usable, the legacy canonical file remains readable; non-ENOENT snapshot read errors propagate.
 
-A partial or uncommitted snapshot is never selected because it has no complete valid journal commit. The previous committed snapshot is not modified, and no rename/unlink is needed for these four files. Snapshot files accumulate because deletion is unavailable. Released lock generations also remain on disk, but are reused; generation count reflects peak concurrency rather than writes over time. Other files retain the temp+rename writer, but the shared writer also no longer fsyncs them; rename restrictions still apply, and these files do not gain the snapshot/journal fallback.
+A partial or uncommitted snapshot is never selected because it has no complete valid journal commit. The previous committed snapshot is not modified. Snapshot files accumulate because deletion is unavailable. Released lock generations also remain on disk, but are reused; generation count reflects peak concurrency rather than writes over time. The shared temp+rename writer still does not fsync the temporary file or directory; rename restrictions remain the reason a path may enter the fallback.
 
 ## Lock and error propagation
 

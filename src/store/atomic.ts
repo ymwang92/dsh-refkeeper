@@ -137,13 +137,16 @@ export async function readFileAtomic(file: string): Promise<string> {
   return readFile(file, 'utf8')
 }
 
-function usesVersionJournal(file: string): boolean {
-  return ['refs.json', 'quarantine.json', 'annotated.md', 'last-capture.json'].includes(basename(file))
+const snapshotFallbackPaths = new Set<string>()
+
+class AtomicRenameFailure extends Error {
+  constructor(file: string, error: unknown) {
+    super(`cannot rename ${file}: ${error instanceof Error ? error.message : String(error)}`)
+    this.name = 'AtomicRenameFailure'
+  }
 }
 
 async function writeWithRename(file: string, data: string): Promise<void> {
-  const dir = dirname(file)
-  await mkdir(dir, { recursive: true })
   const tmp = `${file}.${String(process.pid)}.${String(Date.now())}.tmp`
   let handle: FileHandle | undefined
   try {
@@ -151,7 +154,6 @@ async function writeWithRename(file: string, data: string): Promise<void> {
     await handle.writeFile(data, 'utf8')
     await handle.close()
     handle = undefined
-    await rename(tmp, file)
   } catch (error) {
     await handle?.close().catch(() => undefined)
     await rm(tmp, { force: true }).catch(() => undefined)
@@ -160,13 +162,20 @@ async function writeWithRename(file: string, data: string): Promise<void> {
       `cannot write ${file}: ${error instanceof Error ? error.message : String(error)}`,
     )
   }
+
+  try {
+    await rename(tmp, file)
+  } catch (error) {
+    await rm(tmp, { force: true }).catch(() => undefined)
+    throw new AtomicRenameFailure(file, error)
+  }
 }
 
-/** Persist refs data as an immutable snapshot and append a checksummed commit record.
+/** Persist a file version as an immutable snapshot and append a checksummed commit record.
  *
- * This avoids rename/unlink entirely for the files affected by the host sandbox.
- * Until the journal record is complete, the previous committed version remains
- * visible. Uncommitted snapshots are retained because unlink is forbidden.
+ * This is the fallback used only after atomic rename fails for a file path. Until
+ * the journal record is complete, the previous committed version remains visible.
+ * Uncommitted snapshots are retained because unlink is forbidden.
  */
 async function appendJournalRecord(file: string, record: CommitRecord): Promise<void> {
   const handle = await open(journalPath(file), 'a+')
@@ -187,13 +196,20 @@ async function appendJournalRecord(file: string, record: CommitRecord): Promise<
 }
 
 export async function writeFileAtomic(file: string, data: string): Promise<void> {
-  if (!usesVersionJournal(file)) {
-    await writeWithRename(file, data)
-    return
-  }
+  const resolvedPath = resolve(file)
   const dir = dirname(file)
   await mkdir(dir, { recursive: true })
   await serialize(file, async () => {
+    if (!snapshotFallbackPaths.has(resolvedPath)) {
+      try {
+        await writeWithRename(file, data)
+        return
+      } catch (error) {
+        if (!(error instanceof AtomicRenameFailure)) throw error
+        snapshotFallbackPaths.add(resolvedPath)
+      }
+    }
+
     const tail = await journalTailRecords(file)
     let version = Math.max(0, ...tail.records.map((record) => record.version)) + 1
     let snapshot: string

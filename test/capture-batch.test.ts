@@ -1,7 +1,12 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, rename: vi.fn(actual.rename) }
+})
 import {
   BATCH_MARKER,
   batchPath,
@@ -42,6 +47,7 @@ describe('capture batch persistence', () => {
   })
 
   it('propagates batch persistence failures instead of silently reporting success', async () => {
+    vi.mocked(rename).mockRejectedValueOnce(Object.assign(new Error('EPERM'), { code: 'EPERM' }))
     const journalDirectory = `${batchPath(workspace)}.journal`
     await mkdir(journalDirectory, { recursive: true })
     await expect(writeBatch(workspace, batch)).rejects.toThrow()

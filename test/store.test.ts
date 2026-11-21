@@ -477,3 +477,50 @@ describe('annotated.md', () => {
     expect(rendered).not.toContain('does not mention')
   })
 })
+
+describe('atomic-first storage writes', () => {
+  it('falls back to snapshots after rename fails and keeps that path sticky', async () => {
+    const path = storePaths(workspace).refs
+    const renameMock = vi.mocked((await import('node:fs/promises')).rename)
+    renameMock.mockClear()
+
+    await writeFileAtomic(path, '{"generation":1}')
+
+    expect(renameMock).toHaveBeenCalledTimes(1)
+    expect(await readFileAtomic(path)).toBe('{"generation":1}')
+    const firstFiles = await readdir(join(workspace, 'refs'))
+    expect(firstFiles).toContain('refs.json.v1')
+    expect(firstFiles).toContain('refs.json.journal')
+
+    await writeFileAtomic(path, '{"generation":2}')
+
+    expect(renameMock).toHaveBeenCalledTimes(1)
+    expect(await readFileAtomic(path)).toBe('{"generation":2}')
+    const finalFiles = await readdir(join(workspace, 'refs'))
+    expect(finalFiles).toContain('refs.json.v2')
+    expect(finalFiles.some((name) => name.endsWith('.tmp'))).toBe(false)
+  })
+
+  it('keeps the rename path when it succeeds without creating snapshots', async () => {
+    const path = storePaths(workspace).refs
+    const renameMock = vi.mocked((await import('node:fs/promises')).rename)
+    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    renameMock.mockClear()
+    renameMock.mockImplementation(actual.rename)
+
+    try {
+      await writeFileAtomic(path, '{"generation":"atomic"}')
+
+      expect(renameMock).toHaveBeenCalledTimes(1)
+      expect(await readFileAtomic(path)).toBe('{"generation":"atomic"}')
+      const files = await readdir(join(workspace, 'refs'))
+      expect(files).toContain('refs.json')
+      expect(files).not.toContain('refs.json.journal')
+      expect(files.some((name) => name.startsWith('refs.json.v'))).toBe(false)
+    } finally {
+      renameMock.mockImplementation(async () => {
+        throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+      })
+    }
+  })
+})
