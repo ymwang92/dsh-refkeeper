@@ -4,6 +4,9 @@
 
 ### Added
 
+- Read the arXiv id out of a BibTeX `eprint` field, so a pasted `@article{…}`
+  that carries an eprint is looked up on arXiv instead of being searched by
+  title across three registries at once.
 - Route PMID and PMCID lookups through PubMed and PMC search/crosswalk respectively.
 - The capture result now reports whether the conversation was cut short by the length budget.
 - Recognize LCCN, OCLC and Open Library identifiers from book links; retain them in saved references and exports without treating them as verification evidence.
@@ -26,6 +29,8 @@
 
 ### 新增
 
+- 从 BibTeX 的 `eprint` 字段读出 arXiv 编号 —— 粘进来的 `@article{…}` 带 eprint 时
+  会直接查 arXiv，而不再按标题同时查三个注册表。
 - PMID 与 PMCID 分别路由至 PubMed 和 PMC 搜索/交叉解析。
 - 捕获结果现在会报告会话内容是否因长度预算被截断。
 - 从图书链接识别 LCCN、OCLC 和 Open Library 标识符，并写入文献记录及导出；这些标识符不会作为核验依据。
