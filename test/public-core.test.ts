@@ -124,14 +124,17 @@ describe('public pure-core entry', () => {
   it('resolves the package subpath to the generated public entry', () => {
     const packageJson = JSON.parse(readFileSync(modulePath('../package.json'), 'utf8')) as {
       exports: Record<string, unknown>
+      scripts: Record<string, unknown>
     }
     expect(packageJson.exports['./core']).toEqual({
       types: './lib/public-core.d.ts',
       default: './lib/public-core.js',
     })
+    expect(packageJson.scripts.prepack).toBeTypeOf('string')
+    expect(packageJson.scripts.prepack).toContain('build')
   })
 
-  it('imports and calls only the public entry from an isolated non-DSH process', () => {
+  it('imports and calls only the public entry from an isolated non-DSH process', { timeout: 120_000 }, () => {
     const entryUrl = pathToFileURL(modulePath('../lib/public-core.js')).href
     const script = `
       import { extractCandidates } from ${JSON.stringify(entryUrl)}
@@ -154,11 +157,12 @@ describe('public pure-core entry', () => {
     expect(result.stdout.trim()).toBe('isolated-core-ok')
   })
 
-  it('resolves the published package subpath from an isolated non-DSH consumer', () => {
+  it('resolves the published package subpath from an isolated non-DSH consumer', { timeout: 120_000 }, () => {
     const packageDirectory = mkdtempSync(join(tmpdir(), 'dsh-refkeeper-package-'))
+    const cacheDirectory = mkdtempSync(join(tmpdir(), 'dsh-refkeeper-npm-cache-'))
     try {
       const repositoryRoot = modulePath('..')
-      const packed = spawnSync('npm', ['pack', '--pack-destination', packageDirectory], {
+      const packed = spawnSync('npm', ['pack', '--cache', cacheDirectory, '--pack-destination', packageDirectory], {
         cwd: repositoryRoot,
         encoding: 'utf8',
         timeout: 60_000,
@@ -171,7 +175,7 @@ describe('public pure-core entry', () => {
       )
       if (tarball === undefined) throw new Error('npm pack did not create a dsh-refkeeper tarball')
 
-      const initialized = spawnSync('npm', ['init', '-y'], {
+      const initialized = spawnSync('npm', ['init', '--cache', cacheDirectory, '-y'], {
         cwd: packageDirectory,
         encoding: 'utf8',
         timeout: 60_000,
@@ -183,6 +187,8 @@ describe('public pure-core entry', () => {
         'npm',
         [
           'install',
+          '--cache',
+          cacheDirectory,
           join(packageDirectory, tarball),
           '--no-audit',
           '--no-fund',
@@ -219,6 +225,7 @@ describe('public pure-core entry', () => {
       expect(result.stdout.trim()).toBe('published-core-ok')
     } finally {
       rmSync(packageDirectory, { recursive: true, force: true })
+      rmSync(cacheDirectory, { recursive: true, force: true })
     }
   })
 })
