@@ -9,6 +9,12 @@ and the npm package is `dsh-refkeeper`.
 - [ ] `lib/` is committed. It is the built artifact, and `dsh plugin add
       github:ymwang92/dsh-refkeeper` installs the repository as-is — without a
       committed `lib/` that command installs a package that cannot load.
+- [ ] After `npm run build`, run `git diff --exit-code -- lib`; inspect and commit
+      any generated `lib/` changes rather than weakening the gate.
+
+`npm publish` runs `prepack` (`npm run build`) before creating the npm tarball.
+GitHub/repository installs use the committed `lib/` instead, so build and commit
+`lib/` before release to keep both distribution paths aligned.
 - [ ] `package.json` has `repository`, `homepage` and `bugs` pointing at the
       real URL (the placeholders `ymwang92` are replaced).
 - [ ] `npm pack --dry-run` lists README.md, README.zh.md, LICENSE, lib/,
@@ -20,7 +26,7 @@ and the npm package is `dsh-refkeeper`.
 cd dsh-refkeeper
 git init
 git add -A
-git commit -m "dsh-refkeeper 0.1.0"
+git commit -m "dsh-refkeeper <version>"
 git branch -M main
 git remote add origin git@github.com:ymwang92/dsh-refkeeper.git
 git push -u origin main
@@ -37,7 +43,7 @@ Then, on the repository page:
 
 ```sh
 npm login                      # once per machine
-npm publish                    # publishes 0.1.0 as public
+npm publish                    # publishes <version> as public
 ```
 
 Verify the install path the registry documents actually works:
