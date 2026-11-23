@@ -84,13 +84,13 @@ grep -c "choose"     lib/client.js                 # → 0
 
 外加实施稿 §6.2 的 GUI 实证（V1–V12），截图留档。
 
-## 当前阶段：**0.1.3 已发布（2026-11-08）**
+## 当前阶段：**0.1.6 已发布**
 
 | 产物 | 状态 |
 |---|---|
-| GitHub main | `9ba159d` 已推送 ✓ |
-| GitHub Release | `v0.1.3`（tag 指向 `9ba159d`），附件 `dsh-refkeeper-0.1.3.tgz` ✓ |
-| npm | `dsh-refkeeper@0.1.3`，`latest` tag ✓，已从 registry 装进 desktop profile 验证 ✓ |
+| GitHub main | `0e49d73` 已推送 ✓ |
+| GitHub Release | `v0.1.6`，附件 `dsh-refkeeper-0.1.6.tgz` ✓ |
+| npm | `dsh-refkeeper@0.1.6`，`latest` tag ✓；已用本地 tarball 装进 desktop profile 验证；registry 版待验 |
 | README | 中英双份，npm 页面渲染 tarball 里的 `README.md`（无需手动同步）✓ |
 
 **发布要点（下次复用）**：
@@ -300,12 +300,11 @@ PMID 出现在详情页的「标识信息」组里。
 **V1–V8、V12 已在 B3 build 上实测通过**（见下表）。**V9 / V10 / V11 尚未测**：
 命令字面量、多作者解析、手动入表走 `/refs save`。
 
-### 一个待决策项（不在本批范围）
+### 下一轮存储任务（已决策，尚未实施）
 
-M1 把「不可变版本快照 + 校验日志」做成了 refs 数据**唯一**的写路径。按工程纪律第 4 条，
-更合适的形态是「标准原子写（tmp + rename）优先，失败才降级」—— 否则正常机器上也要为
-只有个别环境才存在的问题付 1.6 倍写延迟与额外复杂度。
-**这个决定需要用户拍板，不要自行改动已收口的 M1。**
+当前 M1 对 refs 数据无条件使用「不可变版本快照 + SHA-256 校验日志」。按工程纪律第 4 条，
+下一轮必须改为「标准原子写（tmp + rename）优先，只有主路径失败时才降级到快照 + 校验日志」。
+**本轮只记录该已批准的下一轮任务，不修改 `src/store/`；这项改造尚未实施。**
 
 ## GUI 实证（2026-11-08 实测跑通的版本）
 

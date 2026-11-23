@@ -10,7 +10,7 @@ The host-independent `dsh-refkeeper/core` subpath is available for pure citation
 npm install dsh-refkeeper@0.1.6
 ```
 
-See the [full changelog](../CHANGELOG.md).
+See the [full changelog](https://github.com/ymwang92/dsh-refkeeper/blob/main/CHANGELOG.md).
 
 # dsh-refkeeper 0.1.6 发布说明
 
@@ -24,4 +24,4 @@ See the [full changelog](../CHANGELOG.md).
 npm install dsh-refkeeper@0.1.6
 ```
 
-完整更新记录见[变更日志](../CHANGELOG.md)。
+完整更新记录见[变更日志](https://github.com/ymwang92/dsh-refkeeper/blob/main/CHANGELOG.md)。
