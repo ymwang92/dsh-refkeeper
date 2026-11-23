@@ -19,11 +19,12 @@ import {
   writeQuarantine,
   writeStore,
 } from '../store/io.ts'
-import { exportableOf, readBatch } from './capture-batch.ts'
+import { encodeBatch, exportableOf, readBatch } from './capture-batch.ts'
 import type { CaptureBatch } from './capture-batch.ts'
 import { SCHEMA_VERSION, StoreError, referenceId, referenceIdentityKey } from '../store/types.ts'
 import type { RefVerification, StoredReference, StoredVerificationStatus } from '../store/types.ts'
 import type { SourceRecord, VerificationReport } from '../verify/types.ts'
+import type { VerificationClaim } from '../verify/lookup.ts'
 
 export const STORE_USAGE = [
   'usage:',
@@ -399,19 +400,96 @@ export interface StoreCommandResult {
   readonly text: string
 }
 
+export function verificationClaimOf(ref: StoredReference): VerificationClaim {
+  return {
+    title: ref.title,
+    authors: ref.authors.map((author) => author.family ?? author.literal ?? '').filter((name) => name !== ''),
+    year: ref.year,
+    doi: ref.identifiers.doi,
+    arxivId: ref.identifiers.arxiv,
+    isbn: ref.identifiers.isbn,
+    reportNumber: ref.identifiers.reportNumber,
+    pmid: ref.identifiers.pmid,
+    pmcid: ref.identifiers.pmcid,
+  }
+}
+
+function reportReasons(report: VerificationReport): readonly string[] {
+  return Array.isArray(report.reasons)
+    ? report.reasons.filter((reason): reason is string => typeof reason === 'string')
+    : []
+}
+
 function verificationOf(ref: StoredReference, report: VerificationReport, now: string): RefVerification {
+  const reasons = reportReasons(report)
+  const titleScore = report.title?.score
+  const firstAuthorPass = report.firstAuthor?.pass
+  const sources = Array.isArray(report.sources) ? report.sources : []
   return {
     status: report.status,
     checkedAt: now,
-    passed: report.passed,
+    ...(typeof report.passed === 'number' ? { passed: report.passed } : {}),
     checks: {
-      title: report.title.score >= 0 ? report.title.score : 0,
-      firstAuthor: report.firstAuthor.pass,
+      ...(typeof titleScore === 'number' ? { title: titleScore >= 0 ? titleScore : 0 } : {}),
+      ...(typeof firstAuthorPass === 'boolean' ? { firstAuthor: firstAuthorPass } : {}),
     },
-    sources: report.sources,
-    reasons: report.reasons,
+    sources,
+    reasons,
     ...(report.partial ? { note: 'partial: at least one source errored or timed out' } : {}),
   }
+}
+
+const REVERIFICATION_REASON_PREFIX = 'refkeeper-latest-verification-reasons:'
+
+async function refreshFailedQuarantineVerifications(
+  workspace: string,
+  failures: readonly { readonly reference: StoredReference; readonly report: VerificationReport }[],
+  now: string,
+): Promise<void> {
+  if (failures.length === 0) return
+  const reportsById = new Map(failures.map(({ reference, report }) => [reference.id, report]))
+  await withStoreLock(storePaths(workspace).dir, async () => {
+    const quarantine = await loadQuarantine(workspace, { now })
+    let changed = false
+    const entries = quarantine.entries.map((reference) => {
+      const report = reportsById.get(reference.id)
+      if (report === undefined) return reference
+      changed = true
+      const verification = verificationOf(reference, report, now)
+      const reasons = reportReasons(report)
+      const detail = reasons.length > 0 ? reasons.join('; ') : `status ${report.status}`
+      const note =
+        verification.note === undefined
+          ? `re-verification failed: ${detail}`
+          : `${verification.note}; re-verification failed: ${detail}`
+      return { ...reference, verification: { ...verification, note } }
+    })
+    if (changed) await writeQuarantine(workspace, { ...quarantine, entries })
+  })
+}
+
+async function batchWithLatestVerificationReasons(
+  workspace: string,
+  failures: readonly { readonly reference: StoredReference; readonly report: VerificationReport }[],
+): Promise<string | undefined> {
+  if (failures.length === 0) return undefined
+  const batch = await readBatch(workspace)
+  if (batch === undefined) return undefined
+  const reasonsById = new Map(
+    failures.map(({ reference, report }) => {
+      const reasons = reportReasons(report)
+      return [reference.id, reasons.length > 0 ? reasons.join('; ') : `status ${report.status}`]
+    }),
+  )
+  let changed = false
+  const entries = batch.entries.map((entry) => {
+    if (entry.id === undefined) return entry
+    const reason = reasonsById.get(entry.id)
+    if (reason === undefined) return entry
+    changed = true
+    return { ...entry, reason: `${REVERIFICATION_REASON_PREFIX}${reason}` }
+  })
+  return changed ? encodeBatch({ ...batch, entries }) : undefined
 }
 
 function insideWorkspace(workspace: string, target: string): string {
@@ -1675,6 +1753,7 @@ export async function runStoreCommand(
       const reason = decodeReasonPayload(parsed.reason)
       const candidates: StoredReference[] = []
       const rejected: string[] = []
+      const failedVerifications: { readonly reference: StoredReference; readonly report: VerificationReport }[] = []
       for (const ref of pool) {
         if (parsed.manual) {
           // Keep what quarantine said, so a manual promotion can still be
@@ -1691,8 +1770,10 @@ export async function runStoreCommand(
           candidates.push({ ...ref, verification: verificationOf(ref, report, now) })
         } else {
           rejected.push(ref.id)
+          if (report !== undefined) failedVerifications.push({ reference: ref, report })
         }
       }
+      await refreshFailedQuarantineVerifications(deps.workspace, failedVerifications, now)
       const result = await promoteQuarantined(deps.workspace, candidates, { now })
       const scope =
         requested === undefined
@@ -1702,6 +1783,8 @@ export async function runStoreCommand(
       if (result.replaced > 0) lines.push(`${String(result.replaced)} replaced an existing entry`)
       if (result.skipped > 0) lines.push(`${String(result.skipped)} no longer in quarantine`)
       if (rejected.length > 0) lines.push(`still quarantined (did not verify): ${rejected.join(', ')}`)
+      const verificationBatch = await batchWithLatestVerificationReasons(deps.workspace, failedVerifications)
+      if (verificationBatch !== undefined) lines.push(verificationBatch)
       return { kind: 'success', text: lines.join('\n') }
     }
     if (parsed.sub === 'dir') {

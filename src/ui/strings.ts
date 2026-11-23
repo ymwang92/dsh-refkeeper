@@ -56,6 +56,7 @@ export interface Strings {
   readonly groupBibliography: string
   readonly groupPublication: string
   readonly quarantineNotice: string
+  readonly latestVerificationReasons: string
   readonly detailBack: string
   readonly detailCreate: string
   readonly detailEdit: string
@@ -134,6 +135,7 @@ export const EN: Strings = {
   groupBibliography: 'Bibliographic details',
   groupPublication: 'Publication',
   quarantineNotice: 'This reference is quarantined and may be excluded from standard exports until verified.',
+  latestVerificationReasons: 'Latest verification reasons:',
   detailBack: 'Back to list',
   detailCreate: 'Complete reference',
   detailEdit: 'Edit reference',
@@ -212,6 +214,7 @@ export const ZH: Strings = {
   groupBibliography: '书目信息',
   groupPublication: '出版信息',
   quarantineNotice: '该条目处于隔离状态；核验前可能不会包含在常规导出中。',
+  latestVerificationReasons: '最近一次核验原因：',
   detailBack: '返回列表',
   detailCreate: '补全文献信息',
   detailEdit: '编辑文献',

@@ -564,6 +564,12 @@ function EntryDetails(props: {
     { key: 'publication', label: text.groupPublication, fields: ['year', 'volume', 'issue', 'publisher', 'publisherPlace'] },
   ] as const
 
+  const reasonPrefix = 'refkeeper-latest-verification-reasons:' // Keep in sync with src/host/store-command.ts.
+  const reason = entry.reason ?? ''
+  const reasonText = reason.startsWith(reasonPrefix)
+    ? `${text.latestVerificationReasons} ${reason.slice(reasonPrefix.length).trim()}`
+    : reason
+
   return React.createElement(
     'div',
     { style: { display: 'grid', gap: UI_TOKENS.layout.sectionGap, minWidth: 0 } },
@@ -571,7 +577,7 @@ function EntryDetails(props: {
       ? React.createElement('div', {
           role: 'status',
           style: { padding: UI_TOKENS.spacing.sm, borderRadius: UI_TOKENS.radius.panel, color: UI_TOKENS.color.warning, background: 'color-mix(in srgb, var(--dsw-alias-warning, #f59e0b) 14%, transparent)', fontSize: UI_TOKENS.fontSize.caption },
-        }, `⚠ ${text.quarantineNotice}${entry.reason ? ` ${entry.reason}` : ''}`)
+        }, `⚠ ${text.quarantineNotice}${reasonText ? ` ${reasonText}` : ''}`)
       : null,
     React.createElement(
       'form',

@@ -20,7 +20,7 @@ import type { SessionLike, SessionQueryLike } from './host/session-read.ts'
 import type { SaveSummary } from './host/refs-command.ts'
 import { collectCapture, parseRefsCommand, runRefsCommand } from './host/refs-command.ts'
 import { renderVerify, runVerifyCommand } from './host/verify-command.ts'
-import { exportLibrary, isStoreSubcommand, runStoreCommand, saveFromPayload } from './host/store-command.ts'
+import { exportLibrary, isStoreSubcommand, runStoreCommand, saveFromPayload, verificationClaimOf } from './host/store-command.ts'
 import type { DirectoryPickerControllerLike, HostFsLike, StoreCommandDeps } from './host/store-command.ts'
 import { LookupCache, verifyCandidate } from './verify/lookup.ts'
 import type { VerificationClaim } from './verify/lookup.ts'
@@ -497,7 +497,7 @@ function storeDeps(cwd: string, signal?: AbortSignal): StoreCommandDeps {
     // but not before the GUI can show that label to the user.
     allowManualConfirm: false,
     resolveIdentifiers: async (doi, arxivId, pmid, pmcid, reportNumber, isbn, url) => {
-      if (doi === '' && arxivId === '' && pmid === '' && pmcid === '' && reportNumber === '') return undefined
+      if (doi === '' && arxivId === '' && pmid === '' && pmcid === '' && isbn === '' && reportNumber === '') return undefined
       const outcome = await verifyCandidate(
         {
           ...(doi === '' ? {} : { doi }),
@@ -520,16 +520,7 @@ function storeDeps(cwd: string, signal?: AbortSignal): StoreCommandDeps {
       return best
     },
     verify: async (ref) => {
-      const outcome = await verifyCandidate(
-        {
-          title: ref.title,
-          authors: ref.authors.map((author) => author.family ?? author.literal ?? '').filter((name) => name !== ''),
-          year: ref.year,
-          doi: ref.identifiers.doi,
-          arxivId: ref.identifiers.arxiv,
-        },
-        { cache: verifyCache },
-      )
+      const outcome = await verifyCandidate(verificationClaimOf(ref), { cache: verifyCache })
       return outcome.report
     },
   }
