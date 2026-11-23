@@ -38,6 +38,12 @@
 13. **★ 宿主沙箱会让「删除」失败，让 `mkdir` / `rm` 的结果被吞 ★**
     `unlink` 一律 EPERM（改用 `mv` 挪走）；`ls f && echo 在 || echo 已删` 会误报
     —— `ls` 失败就走 `||` 分支。**判断文件在不在，用 `test -e` 单独看退出码。**
+13. **★ 提交只署仓库主人，不加 co-author trailer ★** 2026-11-21 有一次提交带了
+    `Co-Authored-By: Claude Opus 4.8`，而 Claude 从未参与这个项目 —— 那是一个写错的署名。
+    GitHub 会把 trailer 计入 Insights → Contributors，于是仓库凭空多出一个贡献者，
+    点进去却没有任何 commit（contributors 图统计 co-author，commits 页只按 author 过滤）。
+    **本仓库的所有提交只署 `ymwang92`，不写 `Co-Authored-By`、不写 `Generated with`。**
+    AI 参与的过程记在提交说明与本文件里就够了，不必在 GitHub 上留一个假身份。
 
 ## 当前任务：捕获面板 UI 改版
 
