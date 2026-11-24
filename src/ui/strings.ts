@@ -76,6 +76,11 @@ export interface Strings {
   readonly fieldArxiv: string
   readonly fieldPmid: string
   readonly fieldPmcid: string
+  readonly fieldIsbn: string
+  readonly fieldReportNumber: string
+  readonly fieldLccn: string
+  readonly fieldOclc: string
+  readonly fieldOpenlibraryId: string
   readonly fieldUrl: string
 }
 
@@ -155,6 +160,11 @@ export const EN: Strings = {
   fieldArxiv: 'arXiv ID',
   fieldPmid: 'PMID',
   fieldPmcid: 'PMCID',
+  fieldIsbn: 'ISBN',
+  fieldReportNumber: 'Report number',
+  fieldLccn: 'LCCN',
+  fieldOclc: 'OCLC',
+  fieldOpenlibraryId: 'Open Library ID',
   fieldUrl: 'URL',
 }
 
@@ -234,6 +244,11 @@ export const ZH: Strings = {
   fieldArxiv: 'arXiv ID',
   fieldPmid: 'PMID',
   fieldPmcid: 'PMCID',
+  fieldIsbn: 'ISBN',
+  fieldReportNumber: '报告号',
+  fieldLccn: 'LCCN',
+  fieldOclc: 'OCLC',
+  fieldOpenlibraryId: 'Open Library ID',
   fieldUrl: 'URL',
 }
 

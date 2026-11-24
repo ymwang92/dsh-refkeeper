@@ -71,6 +71,11 @@ export function fieldsOfReference(ref: StoredReference | undefined): BatchFields
     ...(ref.identifiers.arxiv === undefined ? {} : { arxivId: ref.identifiers.arxiv }),
     ...(ref.identifiers.pmid === undefined ? {} : { pmid: ref.identifiers.pmid }),
     ...(ref.identifiers.pmcid === undefined ? {} : { pmcid: ref.identifiers.pmcid }),
+    ...(ref.identifiers.isbn === undefined ? {} : { isbn: ref.identifiers.isbn }),
+    ...(ref.identifiers.reportNumber === undefined ? {} : { reportNumber: ref.identifiers.reportNumber }),
+    ...(ref.identifiers.lccn === undefined ? {} : { lccn: ref.identifiers.lccn }),
+    ...(ref.identifiers.oclc === undefined ? {} : { oclc: ref.identifiers.oclc }),
+    ...(ref.identifiers.openlibraryId === undefined ? {} : { openlibraryId: ref.identifiers.openlibraryId }),
     ...(ref.url === undefined ? {} : { url: ref.url }),
   }
 }

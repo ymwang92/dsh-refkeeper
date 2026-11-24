@@ -34,6 +34,11 @@ export interface BatchFields {
   readonly arxivId?: string | undefined
   readonly pmid?: string | undefined
   readonly pmcid?: string | undefined
+  readonly isbn?: string | undefined
+  readonly reportNumber?: string | undefined
+  readonly lccn?: string | undefined
+  readonly oclc?: string | undefined
+  readonly openlibraryId?: string | undefined
   readonly url?: string | undefined
 }
 
@@ -99,6 +104,11 @@ function sanitizeFields(value: unknown): BatchFields | undefined {
     ...(plain(raw['arxivId']) === undefined ? {} : { arxivId: plain(raw['arxivId']) }),
     ...(plain(raw['pmid']) === undefined ? {} : { pmid: plain(raw['pmid']) }),
     ...(plain(raw['pmcid']) === undefined ? {} : { pmcid: plain(raw['pmcid']) }),
+    ...(plain(raw['isbn']) === undefined ? {} : { isbn: plain(raw['isbn']) }),
+    ...(plain(raw['reportNumber']) === undefined ? {} : { reportNumber: plain(raw['reportNumber']) }),
+    ...(plain(raw['lccn']) === undefined ? {} : { lccn: plain(raw['lccn']) }),
+    ...(plain(raw['oclc']) === undefined ? {} : { oclc: plain(raw['oclc']) }),
+    ...(plain(raw['openlibraryId']) === undefined ? {} : { openlibraryId: plain(raw['openlibraryId']) }),
     ...(plain(raw['url']) === undefined ? {} : { url: plain(raw['url']) }),
   }
 }

@@ -62,6 +62,25 @@ describe('command payload encoding', () => {
   })
 })
 
+describe('identifier payload encoding', () => {
+  it('round-trips book and report identifiers through the save payload', () => {
+    const payload = {
+      type: 'book',
+      title: 'Drought Atlas',
+      authors: ['Daly, C.'],
+      year: 2006,
+      isbn: '9780306406157',
+      reportNumber: 'NASA/TM-2006-214123',
+      lccn: '2006012345',
+      oclc: '123456789',
+      openlibraryId: 'OL12345W',
+    }
+    const parsed = parseStoreCommand(`save ${payloadFlag(payload)}`)
+    if ('error' in parsed) throw new Error(parsed.error)
+    expect(JSON.parse(decodePayload(parsed.payload))).toEqual(payload)
+  })
+})
+
 describe('saving through the encoded payload', () => {
   let workspace: string
   beforeEach(async () => {
@@ -69,6 +88,18 @@ describe('saving through the encoded payload', () => {
   })
   afterEach(async () => {
     await rm(workspace, { recursive: true, force: true })
+  })
+
+  it('persists an ISBN from the save payload to refs.json', async () => {
+    const result = await runStoreCommand(`save ${payloadFlag({ type: 'book', title: 'ISBN test book', authors: [], isbn: '9780306406157' })}`, {
+      workspace,
+      verify: () => Promise.resolve(VERIFIED),
+    })
+    expect(result.kind).toBe('success')
+    const raw = JSON.parse(await readFileAtomic(join(workspace, 'refs', 'refs.json'))) as {
+      references: Array<{ identifiers: { isbn?: string } }>
+    }
+    expect(raw.references[0]?.identifiers.isbn).toBe('9780306406157')
   })
 
   it('stores the field text exactly as typed', async () => {

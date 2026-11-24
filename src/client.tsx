@@ -288,7 +288,7 @@ function entryMeta(entry: BatchEntry, text: Strings): string {
 }
 
 interface FieldRow {
-  readonly key: 'type' | 'title' | 'authors' | 'containerTitle' | 'year' | 'volume' | 'issue' | 'pages' | 'publisher' | 'publisherPlace' | 'language' | 'doi' | 'arxivId' | 'pmid' | 'pmcid' | 'url'
+  readonly key: 'type' | 'title' | 'authors' | 'containerTitle' | 'year' | 'volume' | 'issue' | 'pages' | 'publisher' | 'publisherPlace' | 'language' | 'doi' | 'arxivId' | 'pmid' | 'pmcid' | 'isbn' | 'reportNumber' | 'lccn' | 'oclc' | 'openlibraryId' | 'url'
   readonly label: (text: Strings) => string
   readonly multiline?: boolean
   readonly numeric?: boolean
@@ -313,6 +313,11 @@ const FIELDS: readonly FieldRow[] = [
   { key: 'arxivId', label: (text) => text.fieldArxiv },
   { key: 'pmid', label: (text) => text.fieldPmid },
   { key: 'pmcid', label: (text) => text.fieldPmcid },
+  { key: 'isbn', label: (text) => text.fieldIsbn },
+  { key: 'reportNumber', label: (text) => text.fieldReportNumber },
+  { key: 'lccn', label: (text) => text.fieldLccn },
+  { key: 'oclc', label: (text) => text.fieldOclc },
+  { key: 'openlibraryId', label: (text) => text.fieldOpenlibraryId },
   { key: 'url', label: (text) => text.fieldUrl },
 ]
 
@@ -335,6 +340,11 @@ function draftOf(entry: BatchEntry): Record<string, string> {
     arxivId: fields?.arxivId ?? entry.arxivId ?? '',
     pmid: fields?.pmid ?? entry.pmid ?? '',
     pmcid: fields?.pmcid ?? entry.pmcid ?? '',
+    isbn: fields?.isbn ?? '',
+    reportNumber: fields?.reportNumber ?? '',
+    lccn: fields?.lccn ?? '',
+    oclc: fields?.oclc ?? '',
+    openlibraryId: fields?.openlibraryId ?? '',
     url: fields?.url ?? '',
   }
   return base
@@ -559,7 +569,7 @@ function EntryDetails(props: {
     : manualOutcome === 'unconfirmed' || editNotice ? UI_TOKENS.color.neutral : UI_TOKENS.color.success
 
   const groupDefinitions = [
-    { key: 'identifiers', label: text.groupIdentifiers, fields: ['type', 'doi', 'arxivId', 'pmid', 'pmcid', 'url'] },
+    { key: 'identifiers', label: text.groupIdentifiers, fields: ['type', 'doi', 'arxivId', 'pmid', 'pmcid', 'isbn', 'reportNumber', 'lccn', 'oclc', 'openlibraryId', 'url'] },
     { key: 'bibliography', label: text.groupBibliography, fields: ['title', 'authors', 'containerTitle', 'pages', 'language'] },
     { key: 'publication', label: text.groupPublication, fields: ['year', 'volume', 'issue', 'publisher', 'publisherPlace'] },
   ] as const

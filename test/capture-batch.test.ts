@@ -17,6 +17,9 @@ import {
 } from '../src/host/capture-batch.ts'
 import type { CaptureBatch } from '../src/host/capture-batch.ts'
 import { decodeBatch, findLatestBatch, normalizeBatch } from '../src/core/batch.ts'
+import { extractCandidates } from '../src/core/candidates.ts'
+import { fieldsOfReference, saveCaptured } from '../src/host/capture-save.ts'
+import { saveFromPayload } from '../src/host/store-command.ts'
 
 const batch: CaptureBatch = {
   capturedAt: '2026-10-29T13:00:00.000Z',
@@ -68,6 +71,46 @@ describe('capture batch export scope', () => {
   it('exports only saved entries by default and adds quarantined on request', () => {
     expect(exportableOf(batch, false)).toEqual(['ref_saved'])
     expect(exportableOf(batch, true)).toEqual(['ref_saved', 'ref_quarantined'])
+  })
+})
+
+describe('captured identifier fields', () => {
+  it('carries an Open Library URL identifier through save and the persisted batch', async () => {
+    const candidates = extractCandidates([{
+      seq: 41,
+      role: 'user',
+      text: 'https://openlibrary.org/books/OL12345M',
+    }])
+    expect(candidates).toHaveLength(1)
+    const candidate = candidates[0]
+    if (candidate === undefined) throw new Error('Expected an Open Library URL candidate')
+    expect(candidate.openlibraryId).toBe('OL12345M')
+
+    const capturedAt = '2026-10-29T13:00:00.000Z'
+    const summary = await saveCaptured([{ ...candidate, title: 'A captured book', type: 'book' }], {
+      resolveIdentifier: async () => undefined,
+      now: () => capturedAt,
+      save: async (payload) => {
+        const result = await saveFromPayload(payload, {
+          workspace,
+          allowManualConfirm: true,
+          now: () => capturedAt,
+        })
+        if (result.kind === 'error') return { kind: 'error', reason: result.text }
+        return {
+          kind: 'success',
+          id: result.id,
+          quarantined: result.quarantined,
+          fields: fieldsOfReference(result.reference),
+        }
+      },
+    })
+    expect(summary).toMatchObject({ saved: 1, skipped: 0, failed: 0 })
+
+    const savedBatch: CaptureBatch = { capturedAt, scope: 'this turn', entries: summary.entries }
+    expect(await writeBatch(workspace, savedBatch)).toBe(true)
+    const persisted = await readBatch(workspace)
+    expect(persisted?.entries[0]?.fields?.openlibraryId).toBe('OL12345M')
   })
 })
 
@@ -127,6 +170,11 @@ describe('editable field snapshots', () => {
             doi: '10.1000/x',
             pmid: '12345678',
             pmcid: 'PMC1234567',
+            isbn: '9780306406157',
+            reportNumber: 'NASA/TM-2006-214123',
+            lccn: '2006012345',
+            oclc: '123456789',
+            openlibraryId: 'OL12345W',
           },
           pmid: '12345678',
           pmcid: 'PMC1234567',
@@ -145,6 +193,11 @@ describe('editable field snapshots', () => {
       doi: '10.1000/x',
       pmid: '12345678',
       pmcid: 'PMC1234567',
+      isbn: '9780306406157',
+      reportNumber: 'NASA/TM-2006-214123',
+      lccn: '2006012345',
+      oclc: '123456789',
+      openlibraryId: 'OL12345W',
     })
     expect(batch?.entries[0]).toMatchObject({ pmid: '12345678', pmcid: 'PMC1234567' })
   })

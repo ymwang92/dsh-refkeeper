@@ -29,9 +29,17 @@ describe('capture panel field groups', () => {
     expect(missing).toEqual([])
   })
 
-  it('groups the PubMed identifiers with the other identifiers', () => {
+  it('serializes every populated field from the shared field list', () => {
+    expect(source).toContain('for (const field of FIELDS)')
+    expect(source).toContain('payload[field.key] = value')
+  })
+
+  it('groups all citation identifiers in the requested order', () => {
     const identifiers = groupBlocks[0] ?? ''
-    expect(identifiers).toContain("'pmid'")
-    expect(identifiers).toContain("'pmcid'")
+    const keys = [...identifiers.matchAll(/'([a-zA-Z]+)'/g)].map((m) => m[1] ?? '')
+    expect(keys).toEqual([
+      'type', 'doi', 'arxivId', 'pmid', 'pmcid', 'isbn', 'reportNumber',
+      'lccn', 'oclc', 'openlibraryId', 'url',
+    ])
   })
 })
