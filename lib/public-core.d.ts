@@ -362,7 +362,7 @@ export declare function yearMatches(candidateYear: number | undefined, recordYea
 export declare function familyName(author: string): string;
 /** Condition 3: first author's family name equal, or one edit apart when long. */
 export declare function firstAuthorMatches(candidateAuthors: readonly string[], recordAuthors: readonly string[]): boolean;
-/** Minimum best-record score before any condition is even considered. */
+/** Minimum best-record score unless the title condition itself passes. */
 export declare const MIN_RECORD_SCORE = 0.75;
 type Comparable = Pick<Candidate, 'title' | 'authors' | 'year' | 'doi' | 'arxivId'>;
 /** §5.3 candidate selection score for one registry record. */

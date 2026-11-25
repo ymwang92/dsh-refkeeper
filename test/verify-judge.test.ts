@@ -63,28 +63,31 @@ describe('judgeCandidate matrix', () => {
     expect(report.reasons).toEqual([])
   })
 
-  it('does not verify a perfect returned record when another source failed', () => {
+  it('verifies a perfect returned record when another source failed and records the partial result', () => {
     const report = judgeCandidate({
       candidate: candidate(),
       records: [record()],
       errors: ['openalex'],
       answered: ['crossref'],
     })
-    expect(report.status).toBe('unverified')
+    expect(report.status).toBe('verified')
     expect(report.passed).toBe(3)
     expect(report.partial).toBe(true)
+    expect(report.sources).toEqual(['crossref'])
+    expect(report.matchedSource).toBe('crossref')
     expect(report.reasons).toContain('source-error')
   })
 
-  it('does not downgrade a partial round to a conclusive warning', () => {
+  it('judges a partial record normally and warns when exactly two conditions pass', () => {
     const report = judgeCandidate({
       candidate: candidate(),
       records: [record({ year: 2020 })],
       errors: ['openalex'],
       answered: ['crossref'],
     })
-    expect(report.status).toBe('unverified')
+    expect(report.status).toBe('warning')
     expect(report.passed).toBe(2)
+    expect(report.partial).toBe(true)
     expect(report.reasons).toEqual(expect.arrayContaining(['year-mismatch', 'source-error']))
   })
 
@@ -119,14 +122,18 @@ describe('judgeCandidate matrix', () => {
     expect(report.reasons).not.toContain('no-source-hit')
   })
 
-  it('never verifies without a source, even if a record were perfect', () => {
-    const report = judgeCandidate({ candidate: candidate(), records: [], errors: ['openalex'] })
+  it('reports unavailable sources as unverified when no records were returned', () => {
+    const report = judgeCandidate({
+      candidate: candidate(),
+      records: [],
+      errors: ['openalex'],
+      timedOut: true,
+    })
     expect(report.status).toBe('unverified')
     expect(report.passed).toBe(0)
     expect(report.partial).toBe(true)
-    // With an error in the round and no record of who answered, "no source hit"
-    // is not something this layer can assert.
-    expect(report.reasons).toEqual(['source-error'])
+    // A timeout/error with no returned record cannot assert a no-source-hit verdict.
+    expect(report.reasons).toEqual(['timeout', 'source-error'])
   })
 
   it('quarantines with no-source-hit only when a source actually answered', () => {
@@ -163,6 +170,26 @@ describe('judgeCandidate matrix', () => {
   it('treats an unknown registry year as a failed condition', () => {
     const report = judgeCandidate({ candidate: candidate(), records: [record({ year: undefined })] })
     expect(report.year.pass).toBe(false)
+    expect(report.status).toBe('warning')
+  })
+
+  it('does not quarantine a near-identical title when the candidate year is missing', () => {
+    const candidateWithoutYear = candidate({
+      title: 'A Comprehensive Study of Neural Information Retrieval in Large Biomedical Collections',
+      authors: ['Smith, A.'],
+      year: undefined,
+    })
+    const nearRecord = record({
+      title: 'A Comprehensive Study of Neural Information Retrieval in Large Biomedical Collection',
+      authors: ['Smith, A.'],
+      year: 2024,
+    })
+    expect(scoreRecord(candidateWithoutYear, nearRecord)).toBeLessThan(0.75)
+
+    const report = judgeCandidate({ candidate: candidateWithoutYear, records: [nearRecord] })
+    expect(report.title.pass).toBe(true)
+    expect(report.year.pass).toBe(false)
+    expect(report.passed).toBe(2)
     expect(report.status).toBe('warning')
   })
 })

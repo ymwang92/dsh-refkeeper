@@ -4,9 +4,9 @@
  *
  * Two rules are load-bearing:
  *  - all three conditions must pass *and* at least one authoritative source must
- *    have answered; a perfect string match against no source is not verified;
- *  - failures close: a source that did not answer can only downgrade the verdict
- *    (`unverified`), never upgrade it.
+ *    have returned a record; a perfect string match against no source is not verified;
+ *  - a source failure marks the report partial, but does not veto evidence from
+ *    records that did return. With no record to judge, a partial run is unverified.
  */
 
 import type { Candidate } from '../core/candidates.ts'
@@ -14,7 +14,7 @@ import { familyName, firstAuthorMatches, titleSimilarity } from './match.ts'
 import { titleMatches, yearMatches } from './match.ts'
 import type { ConditionCheck, ReasonCode, SourceId, SourceRecord, VerificationReport } from './types.ts'
 
-/** Minimum best-record score before any condition is even considered. */
+/** Minimum best-record score unless the title condition itself passes. */
 export const MIN_RECORD_SCORE = 0.75
 
 type Comparable = Pick<Candidate, 'title' | 'authors' | 'year' | 'doi' | 'arxivId'>
@@ -92,7 +92,7 @@ export function judgeCandidate(input: {
     }
   }
 
-  if (best.score < MIN_RECORD_SCORE) {
+  if (best.score < MIN_RECORD_SCORE && !titleMatches(candidate.title, best.record.title)) {
     const reasons: ReasonCode[] = ['ambiguous-record']
     if (input.timedOut === true) reasons.push('timeout')
     if (errors.length > 0) reasons.push('source-error')
@@ -134,14 +134,14 @@ export function judgeCandidate(input: {
   if (input.timedOut === true) reasons.push('timeout')
   if (errors.length > 0) reasons.push('source-error')
 
+  // A source outage is recorded in `partial` and `reasons`, but it cannot veto
+  // the verdict supported by the records that did answer.
   const status =
-    partial
-      ? 'unverified'
-      : passed === 3 && sources.length >= 1
-        ? 'verified'
-        : passed === 2
-          ? 'warning'
-          : 'quarantined'
+    passed === 3 && sources.length >= 1
+      ? 'verified'
+      : passed === 2
+        ? 'warning'
+        : 'quarantined'
 
   return {
     ...base,
