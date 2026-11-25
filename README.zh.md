@@ -189,8 +189,8 @@ GB/T 7714 格式的参考文献行与 APA、IEEE、BibTeX、Vancouver 一起解�
 | 徽章 | 一眼看出这条的状态：已入表、⚠ 隔离、跳过、失败 |
 | 副行 | 第一作者 · 年份 · 出版物，以及没通过时的那句原因 |
 | 点条目 | 打开独立的编辑页，不挤在列表里 |
-| 编辑页的三组字段 | 标识信息（条目类型、DOI、arXiv ID、PMID、PMCID、URL）、书目信息、出版信息 |
-| 图书链接标识符 | LCCN、OCLC 和 Open Library ID 会保存并导出，但不会在面板中显示。 |
+| 编辑页的三组字段 | 标识信息（条目类型、DOI、arXiv ID、PMID、PMCID、ISBN、报告号、LCCN、OCLC、Open Library ID、URL）、书目信息、出版信息 |
+| 图书链接标识符 | LCCN、OCLC 和 Open Library ID 现在会显示在标识信息组中，并可编辑后写回文献记录。 |
 | 条目类型 | 七种类型的下拉框；自由文本会在导出时静默失败 |
 | 手动入表 | 跳过的条目可以在这里补全元数据后入库 |
 | 导出格式 | BibTeX、RIS 或两者 |

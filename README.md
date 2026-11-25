@@ -191,8 +191,8 @@ Registry coverage for Chinese journals is thin: CNKI, Wanfang and CQVIP links ar
 | Badge | the state of the row at a glance: saved, ⚠ quarantined, skipped, failed |
 | Sub-line | first author · year · venue, plus the reason when the check failed |
 | Click a row | opens an independent edit page instead of expanding inside the list |
-| Three field groups | identifiers (type, DOI, arXiv id, PMID, PMCID, URL), bibliography, publication |
-| Book-link identifiers | LCCN, OCLC and Open Library ID are stored and exported, but are not displayed in the panel. |
+| Three field groups | identifiers (type, DOI, arXiv id, PMID, PMCID, ISBN, report number, LCCN, OCLC, Open Library ID, URL), bibliography, publication |
+| Book-link identifiers | LCCN, OCLC and Open Library ID now appear in the panel's identifier group and can be edited back into the reference record. |
 | Entry type | a dropdown of the seven types; free text fails silently at export time |
 | Manual entry | a skipped row can be completed here and stored |
 | Format | BibTeX, RIS, or both |

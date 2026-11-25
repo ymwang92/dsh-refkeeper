@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.1.7 — 2026-11-25
+
+### Added
+
+- The panel now shows ISBN, report number, LCCN, OCLC and Open Library ID in its identifier group and lets users edit those values back into the reference record.
+
+### Changed
+
+- Re-verification now queries every available ISBN, report number, PMID and PMCID, refreshes status and reasons after a failed check, and shows the latest verification reason in quarantine.
+- A registry that times out or errors no longer vetoes evidence returned by another source; verdicts follow the sources that actually returned records.
+- A near-identical title without a year is no longer sent straight to quarantine.
+
+### Fixed
+
+- Reference writes try temp-file-plus-rename first and use immutable snapshots with a validation journal only if atomic writing fails.
+- BibTeX and RIS exports now note when a registry did not respond during verification.
+
+### 中文
+
+### 新增
+
+- 面板的标识符组现在显示 ISBN、报告号、LCCN、OCLC 与 Open Library ID，并可编辑后写回文献记录。
+
+### 变更
+
+- 重新核验会查询可用的 ISBN、报告号、PMID 与 PMCID；即使核验未通过，也会刷新状态和原因，隔离区会显示最近一次核验原因。
+- 判定依据改为实际响应并返回记录的来源；另一个注册表超时或报错，不会推翻已获得的证据。
+- 年份缺失但标题几乎一致的匹配结果，不再直接被送入隔离区。
+
+### 修复
+
+- 文献写入会先尝试临时文件加重命名的原子写入；只有原子写入失败时，才退回不可变快照和校验日志。
+- 核验期间若有注册表未能响应，BibTeX 与 RIS 导出会注明这一情况。
+
+Tests: 33 files / 533 tests.
+测试：33 个文件 / 533 项。
+
+---
+
 ## 0.1.6 — 2026-11-18
 
 ### Added
