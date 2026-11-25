@@ -1,6 +1,7 @@
 import type { RefAuthor, RefType, StoredReference } from '../store/types.ts'
 
 export const MANUAL_NOTE = 'Manual entry: stored without registry verification.'
+export const REGISTRY_PARTIAL_NOTE = 'Some registries did not answer during verification.'
 
 const TYPE_MAP: Record<RefType, string> = {
   journalArticle: 'article',
@@ -126,6 +127,9 @@ export function bibtexFields(ref: StoredReference): Array<[string, string]> {
     ref.identifiers.lccn ? `LCCN: ${ref.identifiers.lccn}` : '',
     ref.identifiers.oclc ? `OCLC: ${ref.identifiers.oclc}` : '',
     ref.identifiers.openlibraryId ? `Open Library: ${ref.identifiers.openlibraryId}` : '',
+    ref.verification.reasons?.some((reason) => reason === 'timeout' || reason === 'source-error')
+      ? REGISTRY_PARTIAL_NOTE
+      : '',
   ].filter((part) => part !== '')
   if (noteParts.length > 0) push('note', escapeBibtex(noteParts.join(' ')))
   return fields

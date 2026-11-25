@@ -1,4 +1,5 @@
 import type { RefAuthor, RefType, StoredReference } from '../store/types.ts'
+import { REGISTRY_PARTIAL_NOTE } from './bibtex.ts'
 
 const RIS_TYPE: Record<RefType, string> = {
   journalArticle: 'JOUR',
@@ -60,6 +61,9 @@ export function renderRisEntry(ref: StoredReference): string {
   if (annotation?.caveats) rows.push(['N1', `Caveats: ${annotation.caveats}`])
   if (ref.verification.status === 'manual') {
     rows.push(['N1', 'Status: manual entry, stored without registry verification.'])
+  }
+  if (ref.verification.reasons?.some((reason) => reason === 'timeout' || reason === 'source-error')) {
+    rows.push(['N1', REGISTRY_PARTIAL_NOTE])
   }
   if (ref.language) rows.push(['LA', ref.language])
   for (const tag of ref.tags ?? []) rows.push(['KW', tag])

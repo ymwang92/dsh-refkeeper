@@ -113,6 +113,18 @@ describe('bibtex export', () => {
     expect(verified).not.toContain('Manual entry')
   })
 
+  it('notes when a registry did not answer during verification', () => {
+    const partial = ref({
+      verification: { status: 'verified', checkedAt: NOW, passed: 3, reasons: ['source-error'] },
+    })
+    const notes = renderBibtex([partial])
+      .split('\n')
+      .filter((line) => line.startsWith('  note = '))
+    expect(notes).toEqual([
+      '  note = {Some registries did not answer during verification.}',
+    ])
+  })
+
   it('orders entries by author, year and title', () => {
     const out = renderBibtex([
       ref({ title: 'Zeta', year: 2020, authors: [{ family: 'Zulu' }], identifiers: { doi: '10.1000/z' } }),
@@ -132,6 +144,16 @@ describe('ris export', () => {
     expect(entry).toContain('EP  - 58')
     expect(entry).toContain('DO  - 10.1038/nature12373')
     expect(entry.trimEnd().endsWith('ER  -')).toBe(true)
+  })
+
+  it('adds an N1 note when a registry did not answer during verification', () => {
+    const partial = ref({
+      verification: { status: 'verified', checkedAt: NOW, passed: 3, reasons: ['source-error'] },
+    })
+    const notes = renderRisEntry(partial)
+      .split('\n')
+      .filter((line) => line.startsWith('N1  - '))
+    expect(notes).toEqual(['N1  - Some registries did not answer during verification.'])
   })
 
   it('adds PMID, PMCID and book identifier AN rows after existing identifier rows', () => {
@@ -184,6 +206,14 @@ describe('ris export', () => {
     expect(ris).not.toContain('AN  - LCCN:')
     expect(ris).not.toContain('AN  - OCLC:')
     expect(ris).not.toContain('AN  - Open Library:')
+  })
+
+  it('preserves clean verified output without a registry-partial note', () => {
+    const clean = ref({
+      verification: { status: 'verified', checkedAt: NOW, passed: 3, reasons: [] },
+    })
+    expect(renderBibtex([clean])).not.toContain('Some registries did not answer during verification.')
+    expect(renderRisEntry(clean)).not.toContain('Some registries did not answer during verification.')
   })
 
   it('writes only the single present book identifier', () => {
