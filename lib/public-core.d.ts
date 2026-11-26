@@ -486,7 +486,9 @@ export declare function renderBibtex(refs: readonly StoredReference[]): string;
 export declare function renderRisEntry(ref: StoredReference): string;
 /** Same ordering rule as BibTeX: author, year, title. */
 export declare function renderRis(refs: readonly StoredReference[]): string;
-export type ExportFormat = 'bibtex' | 'ris';
+/** Render a deterministic CSL-JSON array, preserving input order and Unicode text. */
+export declare function renderCslJson(refs: readonly StoredReference[]): string;
+export type ExportFormat = 'bibtex' | 'ris' | 'csl-json';
 export declare const EXPORT_EXTENSIONS: Record<ExportFormat, string>;
 export declare function renderExport(format: ExportFormat, refs: readonly StoredReference[]): string;
 export type { QuarantineState, RefAuthor, RefType, StoreState, StoredReference };

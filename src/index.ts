@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import type { Candidate, ModelCandidateInput } from './core/candidates.ts'
 import { candidateFromModel, mergeCandidates, rankCandidates, sanitizeEvidence } from './core/candidates.ts'
 import { describeScope, parseScope } from './core/scope.ts'
+import { captureWindowNotice } from './core/batch.ts'
 import { writeBatch } from './host/capture-batch.ts'
 import type { CaptureBatch } from './host/capture-batch.ts'
 import { fieldsOfReference, saveCaptured } from './host/capture-save.ts'
@@ -782,7 +783,7 @@ export const refCaptureTool = defineTool({
         {
           type: 'text',
           text: [
-            `accepted: ${String(value.accepted)} · scope: ${value.scope} · read: ${value.readMode} · truncated: ${String(value.truncated)}`,
+            `accepted: ${String(value.accepted)} · scope: ${value.scope} · read: ${value.readMode} · truncated: ${String(value.truncated)}${value.truncated ? ` · ${captureWindowNotice(value.chars)}` : ''}`,
             `candidates: ${String(candidates.length)}`,
             value.candidatesJson,
             value.note,
@@ -1076,6 +1077,8 @@ function mount(ctx: Context) {
                       capturedAt: new Date().toISOString(),
                       scope: scopeLabelOf(raw),
                       entries: annotated.entries,
+                      truncated: context.truncated,
+                      chars: context.chars,
                     }
                     let persisted = false
                     try {

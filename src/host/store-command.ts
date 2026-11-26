@@ -237,7 +237,7 @@ export function parseStoreCommand(raw: string): ParsedStoreCommand | { readonly 
       out.json = json[1] ?? ''
       continue
     }
-    const format = /^--format=(bibtex|ris|both)$/u.exec(token)
+    const format = /^--format=(bibtex|ris|csl-json|both)$/u.exec(token)
     if (format) {
       out.format = format[1] as ExportFormat | 'both'
       continue

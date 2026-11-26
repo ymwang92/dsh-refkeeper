@@ -63,6 +63,15 @@ export interface CaptureBatch {
   readonly capturedAt: string
   readonly scope: string
   readonly entries: readonly BatchEntry[]
+  /** True when the selected transcript scope exceeded the read budget. */
+  readonly truncated?: boolean
+  /** Characters included in the read window. */
+  readonly chars?: number
+}
+
+/** Explain that the read captured only the newest part of a selected scope. */
+export function captureWindowNotice(chars: number): string {
+  return `the scan budget kept the newest complete messages totaling ${String(chars)} characters; older content was omitted`
 }
 
 function sanitizeFields(value: unknown): BatchFields | undefined {
@@ -163,10 +172,16 @@ export function normalizeBatch(value: unknown): CaptureBatch | undefined {
     const clean = sanitizeEntry(entry)
     if (clean !== undefined) entries.push(clean)
   }
+  const chars =
+    typeof raw['chars'] === 'number' && Number.isSafeInteger(raw['chars']) && raw['chars'] >= 0
+      ? raw['chars']
+      : undefined
   return {
     capturedAt: typeof raw['capturedAt'] === 'string' ? raw['capturedAt'] : '',
     scope: typeof raw['scope'] === 'string' ? raw['scope'] : '',
     entries,
+    ...(raw['truncated'] === true ? { truncated: true } : {}),
+    ...(chars === undefined ? {} : { chars }),
   }
 }
 

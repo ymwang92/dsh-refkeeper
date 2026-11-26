@@ -1,5 +1,6 @@
 import type { Candidate } from '../core/candidates.ts'
 import { extractCandidates } from '../core/candidates.ts'
+import { captureWindowNotice } from '../core/batch.ts'
 import type { BatchEntry, CaptureBatch } from './capture-batch.ts'
 import { BATCH_MARKER, encodeBatch } from './capture-batch.ts'
 import type { AnnotationOutcome, TranscriptLine } from './annotate.ts'
@@ -29,6 +30,10 @@ export interface RefsCommandDeps {
 export interface SaveContext {
   /** The transcript the candidates came out of: annotations are grounded on it. */
   readonly lines: readonly TranscriptLine[]
+  /** Whether the selected transcript scope exceeded the read budget. */
+  readonly truncated: boolean
+  /** Number of transcript characters that were read. */
+  readonly chars: number
 }
 
 /** What `--save` managed to do with the candidates it was handed. */
@@ -168,7 +173,7 @@ export function renderCapture(run: CaptureRun, saving = false): string {
       : 'dsh-refkeeper capture — candidates only, nothing saved yet',
     `scope: ${describeScope(run.scope)}${degraded}`,
     `window: seq ${String(resolution.startSeq)}..${String(resolution.endSeq)}, ${String(resolution.turns)} turn(s), read via ${read.readMode}`,
-    `scanned: ${String(read.segments.length)} message(s), ${String(read.chars)} chars${read.truncated ? ' (truncated by budget)' : ''}`,
+    `scanned: ${String(read.segments.length)} message(s), ${String(read.chars)} chars${read.truncated ? ` (${captureWindowNotice(read.chars)})` : ''}`,
     `candidates: ${String(run.candidates.length)}`,
   ]
   if (run.candidates.length === 0) {
@@ -233,7 +238,11 @@ export async function runRefsCommand(
     text: segment.text,
     role: segment.role,
   }))
-  const summary = await deps.save(run.candidates, { lines: transcript })
+  const summary = await deps.save(run.candidates, {
+    lines: transcript,
+    truncated: run.read.truncated,
+    chars: run.read.chars,
+  })
   const stored = summary.saved + summary.quarantined
   const lines = [
     preview,

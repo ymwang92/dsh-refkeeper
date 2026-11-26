@@ -20,6 +20,8 @@ export interface Strings {
   readonly formatLabel: string
   readonly formatBibtex: string
   readonly formatRis: string
+  readonly formatCslJson: string
+  readonly captureTruncated: string
   readonly batchHeading: string
   readonly batchEmpty: string
   readonly refresh: string
@@ -106,6 +108,8 @@ export const EN: Strings = {
   formatLabel: 'Formats',
   formatBibtex: 'BibTeX',
   formatRis: 'RIS',
+  formatCslJson: 'CSL-JSON',
+  captureTruncated: 'Scan budget reached: the newest complete messages total {chars} characters; older content was omitted.',
   batchHeading: 'Last capture',
   batchEmpty: 'Nothing captured yet — the export buttons then fall back to the whole library.',
   refresh: 'Refresh list',
@@ -190,6 +194,8 @@ export const ZH: Strings = {
   formatLabel: '导出格式',
   formatBibtex: 'BibTeX',
   formatRis: 'RIS',
+  formatCslJson: 'CSL-JSON',
+  captureTruncated: '已达到扫描上限：保留的最新完整消息合计 {chars} 个字符；更早内容未纳入。',
   batchHeading: '最近一次捕获',
   batchEmpty: '还没有捕获记录；此时导出会退回整库。',
   refresh: '刷新列表',

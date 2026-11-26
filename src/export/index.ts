@@ -1,17 +1,20 @@
 import { renderBibtex } from './bibtex.ts'
 import { renderRis } from './ris.ts'
+import { renderCslJson } from './csl-json.ts'
 import { usefulAnnotationText } from '../core/annotation-text.ts'
 import { stripMarkup } from '../core/text.ts'
 import type { StoredReference } from '../store/types.ts'
 
 export { renderBibtex, makeCiteKey, escapeBibtex } from './bibtex.ts'
 export { renderRis, renderRisEntry } from './ris.ts'
+export { renderCslJson } from './csl-json.ts'
 
-export type ExportFormat = 'bibtex' | 'ris'
+export type ExportFormat = 'bibtex' | 'ris' | 'csl-json'
 
 export const EXPORT_EXTENSIONS: Record<ExportFormat, string> = {
   bibtex: 'bib',
   ris: 'ris',
+  'csl-json': 'json',
 }
 
 /**
@@ -73,5 +76,7 @@ function cleanForExport(ref: StoredReference): StoredReference {
 
 export function renderExport(format: ExportFormat, refs: readonly StoredReference[]): string {
   const clean = refs.map(cleanForExport)
-  return format === 'bibtex' ? renderBibtex(clean) : renderRis(clean)
+  if (format === 'bibtex') return renderBibtex(clean)
+  if (format === 'ris') return renderRis(clean)
+  return renderCslJson(clean)
 }

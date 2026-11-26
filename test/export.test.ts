@@ -281,6 +281,75 @@ describe('export facade', () => {
     expect(renderExport('bibtex', [ref()])).toContain('@article')
     expect(renderExport('ris', [ref()])).toContain('TY  - JOUR')
   })
+
+  it('renders CSL-JSON with Unicode ids, CSL fields and supported identifiers', () => {
+    const book = ref({
+      type: 'book',
+      title: '中文书目 示例',
+      authors: [{ literal: '王五' }],
+      year: 2025,
+      publisher: '示例出版社',
+      publisherPlace: '北京',
+      url: 'https://example.test/book',
+      language: 'zh',
+      accessed: '2025-01-02',
+      annotation: {
+        summary: 'A concise summary.',
+        relevance: 'Relevant to cataloguing.',
+        evidence: 'Exact claim from the source.',
+        caveats: 'A known limitation.',
+      },
+      identifiers: {
+        doi: '10.1234/example',
+        arxiv: '2501.12345',
+        pmid: '12345',
+        pmcid: 'PMC12345',
+        isbn: '9780306406157',
+        lccn: '2025001234',
+        oclc: '123456789',
+        openlibraryId: 'OL123M',
+        reportNumber: 'RPT-2025-1',
+      },
+    })
+    const output = renderExport('csl-json', [book, book])
+    const items = JSON.parse(output) as Array<Record<string, unknown>>
+    expect(output.endsWith('\n')).toBe(true)
+    expect(items.map((item) => item['id'])).toEqual([
+      '王五-2025-中文书目-示例',
+      '王五-2025-中文书目-示例-2',
+    ])
+    expect(items[0]).toMatchObject({
+      type: 'book',
+      title: '中文书目 示例',
+      author: [{ literal: '王五' }],
+      issued: { 'date-parts': [[2025]] },
+      accessed: { 'date-parts': [[2025, 1, 2]] },
+      publisher: '示例出版社',
+      'publisher-place': '北京',
+      number: 'RPT-2025-1',
+      DOI: '10.1234/example',
+      ISBN: '9780306406157',
+      PMID: '12345',
+      PMCID: 'PMC12345',
+      URL: 'https://example.test/book',
+      archive: 'arXiv',
+      archive_location: '2501.12345',
+      language: 'zh',
+      abstract: 'A concise summary.',
+    })
+    expect(items[0]?.['note']).toContain('Relevance: Relevant to cataloguing.')
+    expect(items[0]?.['note']).toContain('Evidence: Exact claim from the source.')
+    expect(items[0]?.['note']).toContain('Caveats: A known limitation.')
+    expect(items[0]?.['note']).toContain('LCCN: 2025001234')
+    expect(items[0]?.['note']).toContain('OCLC: 123456789')
+    expect(items[0]?.['note']).toContain('Open Library: OL123M')
+  })
+
+  it('keeps the existing BibTeX and RIS facade bytes unchanged', () => {
+    const item = ref()
+    expect(renderExport('bibtex', [item])).toBe(renderBibtex([item]))
+    expect(renderExport('ris', [item])).toBe(renderRis([item]))
+  })
 })
 
 describe('annotated markdown', () => {

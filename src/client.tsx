@@ -52,9 +52,10 @@ interface PanelState {
   readonly open: boolean
   readonly scope: Scope
   readonly turns: number
-  /** Export formats: BibTeX and RIS are independent choices. */
+  /** BibTeX and RIS may be combined; CSL-JSON is a standalone format. */
   readonly bibtex: boolean
   readonly ris: boolean
+  readonly cslJson: boolean
 }
 
 const INITIAL: PanelState = {
@@ -63,6 +64,7 @@ const INITIAL: PanelState = {
   turns: 3,
   bibtex: true,
   ris: true,
+  cslJson: false,
 }
 
 let state: PanelState = INITIAL
@@ -851,6 +853,9 @@ function PanelView(props: PanelViewProps): React.ReactElement {
       React.createElement('div', { style: { ...ROW_STYLE, flexShrink: 0 } },
         React.createElement('span', { style: { opacity: 0.7, fontSize: UI_TOKENS.fontSize.caption } }, batch.scope),
         React.createElement('button', { type: 'button', onClick: onRefresh, style: { ...BASE_BUTTON, padding: '3px 7px' } }, text.refresh))),
+    batch.truncated === true
+      ? React.createElement('div', { role: 'status', style: { fontSize: UI_TOKENS.fontSize.caption, color: UI_TOKENS.color.warning } }, text.captureTruncated.replace('{chars}', String(batch.chars ?? 0)))
+      : null,
     React.createElement('div', { style: { fontSize: UI_TOKENS.fontSize.caption, color: UI_TOKENS.color.neutral } }, text.selectedCount.replace('{n}', String(pickedCount))),
     ...entries.map((entry, index) => {
       const rowKey = String(index)
@@ -933,6 +938,7 @@ function captureLine(current: PanelState, save = true): string {
 
 /** Export keeps the last capture as its default scope; ticks narrow it to `--ids`. */
 function formatFlag(current: PanelState): string {
+  if (current.cslJson) return '--format=csl-json'
   if (current.bibtex && current.ris) return '--format=both'
   if (current.bibtex) return '--format=bibtex'
   if (current.ris) return '--format=ris'
@@ -1116,21 +1122,28 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
     setNotice(dispatch(props.inputActions, line) ? '' : text.unavailable)
   }
 
-  const formatOption = (key: 'bibtex' | 'ris', label: string): React.ReactElement =>
+  const formatOption = (key: 'bibtex' | 'ris' | 'cslJson', label: string): React.ReactElement =>
     React.createElement(
       'label',
       { key, style: { ...ROW_STYLE, gap: '4px', cursor: 'pointer' } },
       React.createElement('input', {
         type: 'checkbox',
         checked: current[key],
-        onChange: (event: React.ChangeEvent<HTMLInputElement>) => setState({ [key]: event.target.checked } as Partial<PanelState>),
+        onChange: (event: React.ChangeEvent<HTMLInputElement>) => {
+          const checked = event.target.checked
+          if (key === 'cslJson') {
+            setState(checked ? { cslJson: true, bibtex: false, ris: false } : { cslJson: false })
+            return
+          }
+          setState(checked ? { [key]: true, cslJson: false } as Partial<PanelState> : { [key]: false } as Partial<PanelState>)
+        },
       }),
       label,
     )
 
   // No format means no file, so the export buttons are disabled rather than
   // silently exporting both.
-  const canExport = current.bibtex || current.ris
+  const canExport = current.bibtex || current.ris || current.cslJson
   const exportStyle = (): React.CSSProperties => ({
     ...BASE_BUTTON,
     opacity: canExport ? 1 : 0.5,
@@ -1269,6 +1282,7 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
             React.createElement('span', { style: { opacity: 0.75 } }, `${text.formatLabel}:`),
             formatOption('bibtex', text.formatBibtex),
             formatOption('ris', text.formatRis),
+            formatOption('cslJson', text.formatCslJson),
           ),
           React.createElement(
             'div',

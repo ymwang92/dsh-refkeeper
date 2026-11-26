@@ -4,7 +4,7 @@
 
 ![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg) [![npm](https://img.shields.io/npm/v/dsh-refkeeper.svg)](https://www.npmjs.com/package/dsh-refkeeper) [![Awesome DSH Plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com)
 
-长篇研究对话中的引文常散落在不同轮次、工具结果和摘要里。dsh-refkeeper 会从你选定的对话中提取引用，用六个学术注册表核对元数据，再整理为可追溯的文献条目并支持注解及 BibTeX/RIS 导出。报告号可由 DataCite 搜索，ISBN 可由 Open Library 查找图书候选；查询命中不等于核验，仍须通过标题、年份和第一作者三项比对，只有 ISBN 而没有标题的条目仍会进入隔离区。注册表明确不一致的条目也会留在隔离区，不会被当成已核实文献。
+长篇研究对话中的引文常散落在不同轮次、工具结果和摘要里。dsh-refkeeper 会从你选定的对话中提取引用，用六个学术注册表核对元数据，再整理为可追溯的文献条目并支持注解及 BibTeX、RIS 和 CSL-JSON 导出。报告号可由 DataCite 搜索，ISBN 可由 Open Library 查找图书候选；查询命中不等于核验，仍须通过标题、年份和第一作者三项比对，只有 ISBN 而没有标题的条目仍会进入隔离区。注册表明确不一致的条目也会留在隔离区，不会被当成已核实文献。
 
 ![右上角的捕获面板](docs/images/panel.png)
 
@@ -19,8 +19,8 @@
 - **收集引用**。范围可以是本轮、前 N 轮或整个对话。识别 DOI、arXiv 编号、PMID、PMCID、ISBN、报告号，也识别按 APA、GB/T 7714、IEEE、BibTeX、Vancouver 格式写出的参考文献行。部分历史 arXiv 分类编号（如 `math.GT/0309136`、`cs/0112017`）同样支持。
 - **对照注册表核对**。只有标题匹配、年份相差不超过一年、第一作者匹配，并且至少有一个注册表返回了记录，条目才会被接受。注册表有六个：Crossref、OpenAlex、arXiv、DataCite、PubMed，以及 Open Library。
 - **生成注解**。捕获后，由当前会话使用的模型为每条写四个字段：摘要、与本书稿的关系、一段原文引证、注意事项。引证如果没在对话里逐字出现，会被丢弃。
-- **导出**。BibTeX、RIS 或两者。导出范围可以是最近一次捕获、你勾选的条目，或整个文献库。PMID 与 PMCID 会一起写进去。
-- **说清存到哪里**。捕获完成后，面板会告诉你这次存了多少条、存在工作区的 `refs/refs.json`；下面那个「导出到」是 `.bib`/`.ris` 的输出目录，不是文献库。
+- **导出**。BibTeX、RIS、单独的 CSL-JSON，或两者（即 BibTeX + RIS）。导出范围可以是最近一次捕获、你勾选的条目，或整个文献库。PMID 与 PMCID 会一起写进去。
+- **说清存到哪里**。捕获完成后，面板会告诉你这次存了多少条、存在工作区的 `refs/refs.json`；下面那个「导出到」是 `.bib`、`.ris` 和 `.json` 的输出目录，不是文献库。
 
 ## 支持的标识符
 
@@ -96,16 +96,19 @@ BibTeX 条目可以一次贴很多条 —— 一段消息里的几个块会被�
 1. 打开引用过文献的那个对话，点开输入框上方的捕获面板。
 2. 选择范围，点**捕获文献**。
 3. 面板会列出哪些已入库、哪些进了 ⚠ 隔离区。取消勾选这次不需要的条目。
-4. 选择 BibTeX 和/或 RIS，点**导出本次捕获**。
+4. 选择 BibTeX、RIS 或 CSL-JSON，点**导出本次捕获**。
+
+扫描预算截断捕获时，命令和面板会说明保留了最新的完整消息（合计 N 个字符），更早的内容未纳入；保存的批次也会保留截断标记和扫描字符数。
 
 同样的事情用命令：
 
 ```text
 /refs capture --scope=all --save
 /refs export --format=both
+/refs export --format=csl-json
 ```
 
-文件写在会话工作区的 `refs/` 目录下。要导出到别处，在面板里粘贴一次文件夹路径即可，之后记在 `refs/settings.json` 里。会话工作区之外的文件夹会被拒绝，因为宿主只允许写入工作区内。
+文件写在会话工作区的 `refs/` 目录下。BibTeX、RIS 和 CSL-JSON 文件分别使用 `.bib`、`.ris` 和 `.json` 扩展名。要导出到别处，在面板里粘贴一次文件夹路径即可，之后记在 `refs/settings.json` 里。会话工作区之外的文件夹会被拒绝，因为宿主只允许写入工作区内。
 
 ## 输出示例
 
@@ -193,8 +196,8 @@ GB/T 7714 格式的参考文献行与 APA、IEEE、BibTeX、Vancouver 一起解�
 | 图书链接标识符 | LCCN、OCLC 和 Open Library ID 现在会显示在标识信息组中，并可编辑后写回文献记录。 |
 | 条目类型 | 七种类型的下拉框；自由文本会在导出时静默失败 |
 | 手动入表 | 跳过的条目可以在这里补全元数据后入库 |
-| 导出格式 | BibTeX、RIS 或两者 |
-| 导出到 | `.bib`/`.ris` 的输出目录；留空表示 `refs/exports/` |
+| 导出格式 | BibTeX、RIS、CSL-JSON 或两者（BibTeX + RIS） |
+| 导出到 | `.bib`、`.ris` 和 `.json` 的输出目录；留空表示 `refs/exports/` |
 | 导出本次捕获 | 写出勾选的条目 |
 | 导出全部文献 | 写出整个文献库 |
 
@@ -216,7 +219,7 @@ GB/T 7714 格式的参考文献行与 APA、IEEE、BibTeX、Vancouver 一起解�
 | 提升已核验的隔离条目 | `/refs promote [--ids=<payload>]` 或 `/refs promote --manual --reason=<text>` |
 | 修改一个字段 | `/refs edit --id=<id> --payload=<base64url(json)>` |
 | 删除条目 | `/refs remove <id\|doi\|arxiv>...` 或 `/refs remove --all --yes` |
-| 导出 | `/refs export [--format=bibtex\|ris\|both] [--all] [--ids=...] [--out=path]` |
+| 导出 | `/refs export [--format=bibtex\|ris\|csl-json\|both] [--all] [--ids=...] [--out=path]` |
 | 设置导出文件夹 | `/refs dir --set=<base64url(path)>` 或 `/refs dir --clear` |
 
 <details>
@@ -233,7 +236,7 @@ GB/T 7714 格式的参考文献行与 APA、IEEE、BibTeX、Vancouver 一起解�
 /refs promote [--ids=<payload>] [--manual --reason=<text>]
 /refs remove <id|doi|arxiv>... [--quarantine]
 /refs remove --all --yes [--quarantine]
-/refs export [--format=bibtex|ris|both] [--out=path] [--include-quarantine]
+/refs export [--format=bibtex|ris|csl-json|both] [--out=path] [--include-quarantine]
 /refs export [--ids=id,id] [--choose-dir] [--all]
 /refs dir [--set=<base64url(path)>|--clear]
 ```
@@ -256,7 +259,7 @@ GB/T 7714 格式的参考文献行与 APA、IEEE、BibTeX、Vancouver 一起解�
 | `ref_capture` | 从对话里收集候选文献 |
 | `ref_verify` | 对照注册表核对一个标识符或标题 |
 | `ref_save` | 保存一条文献，可附带自己写的注解 |
-| `ref_export` | 为一个批次、一组勾选或整个库写出 BibTeX/RIS |
+| `ref_export` | 为一个批次、一组勾选或整个库写出 BibTeX/RIS；CSL-JSON 请用 `/refs export --format=csl-json` 或面板 |
 | `ref_ping` | 报告哪些宿主服务和注册表可用 |
 
 ## 文件

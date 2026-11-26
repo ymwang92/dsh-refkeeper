@@ -89,6 +89,40 @@ function fencingFs(writes: Write[], inside: boolean): HostFsLike {
   }
 }
 
+describe('CSL-JSON export format', () => {
+  it('accepts CSL-JSON without changing the legacy both default', () => {
+    expect(parseStoreCommand('export')).toMatchObject({ sub: 'export', format: 'both' })
+    expect(parseStoreCommand('export --format=both')).toMatchObject({ sub: 'export', format: 'both' })
+    expect(parseStoreCommand('export --format=csl-json')).toMatchObject({ sub: 'export', format: 'csl-json' })
+  })
+
+  it('writes one CSL-JSON file with a JSON extension', async () => {
+    const verified = coerceReference(
+      {
+        title: 'A verified CSL export fixture',
+        type: 'journalArticle',
+        authors: [{ family: 'Example', given: 'A.' }],
+        year: 2024,
+        verification: { status: 'verified', checkedAt: NOW, passed: 3 },
+      },
+      NOW,
+    )
+    if (!verified) throw new Error('fixture did not coerce')
+    await seedStore([verified])
+    const relativePath = 'refs/exports/csl-test.json'
+    const result = await runStoreCommand(`export --format=csl-json --out=${relativePath} --all`, {
+      workspace,
+      now: () => NOW,
+    })
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain(relativePath)
+    const content = await readFile(join(workspace, relativePath), 'utf8')
+    const items = JSON.parse(content) as Array<Record<string, unknown>>
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({ type: 'article-journal', title: 'A verified CSL export fixture' })
+  })
+})
+
 describe('promote', () => {
   it('requires an explicit reason for manual promotion', () => {
     expect(parseStoreCommand('promote')).toMatchObject({ sub: 'promote', manual: false })

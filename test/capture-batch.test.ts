@@ -16,7 +16,7 @@ import {
   writeBatch,
 } from '../src/host/capture-batch.ts'
 import type { CaptureBatch } from '../src/host/capture-batch.ts'
-import { decodeBatch, findLatestBatch, normalizeBatch } from '../src/core/batch.ts'
+import { captureWindowNotice, decodeBatch, findLatestBatch, normalizeBatch } from '../src/core/batch.ts'
 import { extractCandidates } from '../src/core/candidates.ts'
 import { fieldsOfReference, saveCaptured } from '../src/host/capture-save.ts'
 import { saveFromPayload } from '../src/host/store-command.ts'
@@ -47,6 +47,16 @@ describe('capture batch persistence', () => {
     expect(await writeBatch(workspace, batch)).toBe(true)
     expect(batchPath(workspace).endsWith(join('refs', 'last-capture.json'))).toBe(true)
     expect(await readBatch(workspace)).toEqual(batch)
+  })
+
+  it('persists truncation metadata and explains the complete-message window', async () => {
+    const truncated: CaptureBatch = { ...batch, truncated: true, chars: 199_812 }
+    expect(await writeBatch(workspace, truncated)).toBe(true)
+    expect(await readBatch(workspace)).toEqual(truncated)
+    expect(decodeBatch(encodeBatch(truncated))).toEqual(truncated)
+    expect(captureWindowNotice(199_812)).toBe(
+      'the scan budget kept the newest complete messages totaling 199812 characters; older content was omitted',
+    )
   })
 
   it('propagates batch persistence failures instead of silently reporting success', async () => {

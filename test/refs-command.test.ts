@@ -147,6 +147,36 @@ describe('/refs capture --save', () => {
     expect(result.text).toContain('/refs export --all')
   })
 
+  it('reports the bounded read window and passes truncation metadata to the saver', async () => {
+    const makeText = (label: string): string => `${label}${'x'.repeat(80_000 - label.length)}`
+    const longQuery: SessionQueryLike = {
+      async listEvents() {
+        return RECORDS
+      },
+      async readEvent(request) {
+        return {
+          events: [
+            { seq: 3, type: 'user/message', data: { content: [{ type: 'text', text: makeText('older') }] } },
+            { seq: 4, type: 'assistant/message', data: { content: [{ type: 'text', text: makeText('middle') }] } },
+            { seq: 9, type: 'user/message', data: { content: [{ type: 'text', text: makeText('newest') }] } },
+          ].filter((event) => event.seq <= request.seq),
+        }
+      },
+    }
+    let saveContext: { readonly truncated: boolean; readonly chars: number } | undefined
+    const result = await runRefsCommand('capture --scope=all --save', SESSION, {
+      query: longQuery,
+      sdkVersion: 'test',
+      save: async (_candidates, context) => {
+        saveContext = { truncated: context.truncated, chars: context.chars }
+        return { saved: 1, quarantined: 0, skipped: 0, failed: 0 }
+      },
+    })
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('the scan budget kept the newest complete messages totaling 160000 characters; older content was omitted')
+    expect(saveContext).toEqual({ truncated: true, chars: 160_000 })
+  })
+
   it('explains skipped candidates instead of silently dropping them', async () => {
     const result = await runRefsCommand('capture --scope=all --save', SESSION, {
       query: QUERY,
