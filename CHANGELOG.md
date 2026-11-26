@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.1.8 — 2026-11-26
+
+### Added
+
+- CSL-JSON exports preserve the original title in the Unicode-friendly `id` field; BibTeX citation keys remain ASCII-friendly, for example `anon2024`.
+- Registry base URLs for Crossref, DataCite, OpenAlex, arXiv, PubMed and Open Library can be configured independently.
+- An optional `mailto` contact address can be sent with registry requests.
+
+### Changed
+
+- Capture results report whether the scan budget truncated the conversation and how many characters were retained.
+
+### Fixed
+
+- Opt-in private mode sends no registry requests during capture, verification, re-verification or promotion; captures are saved as manual and marked not verified.
+
+### 中文
+
+### 新增
+
+- CSL-JSON 导出会在支持 Unicode 的 `id` 字段中保留原始标题；BibTeX 引用键仍保持 ASCII 兼容，例如 `anon2024`。
+- 可分别配置 Crossref、DataCite、OpenAlex、arXiv、PubMed 和 Open Library 的注册表基础 URL。
+- 可选的 `mailto` 联系地址可随注册表请求发送。
+
+### 变更
+
+- 捕获结果会说明扫描预算是否截断了对话，以及保留了多少字符。
+
+### 修复
+
+- 主动开启隐私模式后，捕获、核验、重新核验和提升均不会发出注册表请求；捕获条目会作为手动记录保存并标记为未经核验。
+
+Tests: 33 files / 544 tests.
+测试：33 个文件 / 544 项。
+
+---
+
 ## 0.1.7 — 2026-11-25
 
 ### Added

@@ -296,8 +296,8 @@ All plain JSON and Markdown, so they can be committed with the manuscript and di
 
 ## Data and privacy
 
-- In the default mode, verification sends the identifier or title to the configured registry endpoints: Crossref, DataCite, OpenAlex, arXiv, PubMed, and Open Library. A configured `mailto` address is included in registry requests.
-- Private mode is opt-in and disables all registry traffic for capture, `ref_verify`, `/refs verify`, re-verification, and non-manual promotion. Capture still saves entries as manual and marks them **not verified**; manual confirmation or `--manual` promotion remains available. It does not claim those references were registry-checked.
+- By default, registry verification sends a reference's title and any available identifier needed for the check to the relevant configured registry endpoint(s): Crossref, DataCite, OpenAlex, arXiv, PubMed, and Open Library. Each source uses its own configurable base URL; an optional `mailto` contact address is included in requests.
+- Private mode is opt-in and disables all outbound registry requests for capture, `ref_verify`, `/refs verify`, re-verification, and non-manual promotion, so no titles or identifiers are sent. Capture still saves entries as manual and marks them **not verified**; manual confirmation or `--manual` promotion remains available. It does not claim those references were registry-checked.
 - Annotations use the model already configured in the session; the plugin holds no API key of its own. No telemetry. The library is a local file.
 
 ## Development
