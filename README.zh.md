@@ -89,7 +89,11 @@ BibTeX 条目可以一次贴很多条 —— 一段消息里的几个块会被�
 
 ### 配置
 
-无需单独的插件 API key 或注册表配置；注解使用当前会话所选模型。面板中的「导出到」路径保存在 `refs/settings.json`，必须位于当前会话工作区内；文献库仍固定在 `refs/refs.json`。
+注册表核验默认使用内置端点，无需 API key。在 `refs/settings.json` 中，`registryBaseUrls` 可覆盖 Crossref（`api.crossref.org`）、DataCite（`api.datacite.org`）、OpenAlex（`api.openalex.org`）、arXiv（`export.arxiv.org`）、PubMed（`eutils.ncbi.nlm.nih.gov`）和 Open Library（`openlibrary.org`）的基础 URL；对应的映射键为 `crossref`、`datacite`、`openalex`、`arxiv`、`pubmed` 和 `openlibrary`。同一文件还支持可选的 `mailto` 联系地址，用于注册表请求。面板会显示各端点使用的是默认值还是自定义 URL。只接受 HTTP(S) 端点；无效值会显示警告并被忽略，不会阻止捕获。
+
+隐私模式为可选开启，由 `refs/settings.json` 中的 `privateMode` 控制。开启后，捕获、`ref_verify`、`/refs verify`、重新核验和非手动提升均**不会向注册表发出请求**。捕获的文献会作为手动条目保存，并明确标记为**未经核验**；需要时可手动确认，或使用 `--manual` 提升。注解仍使用当前会话所选模型。
+
+面板中的「导出到」路径保存在 `refs/settings.json`，必须位于当前会话工作区内；文献库仍固定在 `refs/refs.json`。
 
 ## 使用
 
@@ -99,6 +103,8 @@ BibTeX 条目可以一次贴很多条 —— 一段消息里的几个块会被�
 4. 选择 BibTeX、RIS 或 CSL-JSON，点**导出本次捕获**。
 
 扫描预算截断捕获时，命令和面板会说明保留了最新的完整消息（合计 N 个字符），更早的内容未纳入；保存的批次也会保留截断标记和扫描字符数。
+
+CSL-JSON 导出包含标准 CSL 书目字段，但不包含 Refkeeper 的核验状态，因此无法在导出文件中区分已核验条目与手动条目；如需保留该状态，请留存带注解的记录。
 
 同样的事情用命令：
 
@@ -285,9 +291,9 @@ refs/exports/           默认导出目录
 
 ## 数据与隐私
 
-- 只有核对请求会离开本机：标识符或标题发给 Crossref、OpenAlex、arXiv、DataCite、PubMed。
-- 注解使用会话里已经配置的模型，插件本身不持有 API key。
-- 没有埋点。文献库就是一个本地文件。
+- 默认模式下，核验会将标识符或标题发送到配置的注册表端点：Crossref、DataCite、OpenAlex、arXiv、PubMed 和 Open Library。注册表请求会附带已配置的 `mailto` 联系地址。
+- 隐私模式需主动开启；开启后，捕获、`ref_verify`、`/refs verify`、重新核验和非手动提升都不会产生注册表网络请求。捕获仍会将条目作为手动记录保存，并标记为**未经核验**；仍可手动确认或使用 `--manual` 提升，但不会声称这些文献经过注册表核对。
+- 注解使用会话里已经配置的模型，插件本身不持有 API key。没有埋点。文献库就是一个本地文件。
 
 ## 开发
 

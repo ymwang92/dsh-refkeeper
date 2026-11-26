@@ -84,6 +84,25 @@ export interface Strings {
   readonly fieldOclc: string
   readonly fieldOpenlibraryId: string
   readonly fieldUrl: string
+  readonly registrySettingsHeading: string
+  readonly registrySettingsHint: string
+  readonly registryPrivateMode: string
+  readonly registryPrivateModeHelp: string
+  readonly registryMailto: string
+  readonly registryCrossref: string
+  readonly registryDatacite: string
+  readonly registryOpenalex: string
+  readonly registryArxiv: string
+  readonly registryPubmed: string
+  readonly registryOpenlibrary: string
+  readonly registryDefaultStatus: string
+  readonly registryCustomStatus: string
+  readonly registrySettingsReload: string
+  readonly registrySettingsSave: string
+  readonly registrySettingsLoading: string
+  readonly registrySettingsSaved: string
+  readonly registrySettingsWarnings: string
+  readonly registrySettingsUnavailable: string
 }
 
 export const EN: Strings = {
@@ -170,6 +189,25 @@ export const EN: Strings = {
   fieldOclc: 'OCLC',
   fieldOpenlibraryId: 'Open Library ID',
   fieldUrl: 'URL',
+  registrySettingsHeading: 'Registry settings',
+  registrySettingsHint: 'Base URLs only; registry paths are appended automatically. Leave defaults unchanged to use public endpoints.',
+  registryPrivateMode: 'Private mode (no registry requests)',
+  registryPrivateModeHelp: 'When enabled, captures are stored as manual and explicitly not verified; no registry requests are sent.',
+  registryMailto: 'Contact email (mailto)',
+  registryCrossref: 'Crossref base URL',
+  registryDatacite: 'DataCite base URL',
+  registryOpenalex: 'OpenAlex base URL',
+  registryArxiv: 'arXiv base URL',
+  registryPubmed: 'PubMed E-utilities base URL',
+  registryOpenlibrary: 'Open Library base URL',
+  registryDefaultStatus: 'Default',
+  registryCustomStatus: 'Custom',
+  registrySettingsReload: 'Reload settings',
+  registrySettingsSave: 'Save settings',
+  registrySettingsLoading: 'Loading registry settings…',
+  registrySettingsSaved: 'Registry settings saved.',
+  registrySettingsWarnings: 'Invalid endpoint URL(s) were ignored; defaults are active for those registries.',
+  registrySettingsUnavailable: 'The composer is not ready; reopen the panel to manage registry settings.',
 }
 
 export const ZH: Strings = {
@@ -256,6 +294,25 @@ export const ZH: Strings = {
   fieldOclc: 'OCLC',
   fieldOpenlibraryId: 'Open Library ID',
   fieldUrl: 'URL',
+  registrySettingsHeading: '注册源设置',
+  registrySettingsHint: '仅填写基础 URL；系统会自动追加注册源路径。保留默认地址即可使用公共端点。',
+  registryPrivateMode: '隐私模式（不发送注册源请求）',
+  registryPrivateModeHelp: '启用后，捕获条目会标记为人工且明确显示未核验；不会发送任何注册源请求。',
+  registryMailto: '联系邮箱（mailto）',
+  registryCrossref: 'Crossref 基础 URL',
+  registryDatacite: 'DataCite 基础 URL',
+  registryOpenalex: 'OpenAlex 基础 URL',
+  registryArxiv: 'arXiv 基础 URL',
+  registryPubmed: 'PubMed E-utilities 基础 URL',
+  registryOpenlibrary: 'Open Library 基础 URL',
+  registryDefaultStatus: '默认',
+  registryCustomStatus: '自定义',
+  registrySettingsReload: '重新读取设置',
+  registrySettingsSave: '保存设置',
+  registrySettingsLoading: '正在读取注册源设置…',
+  registrySettingsSaved: '注册源设置已保存。',
+  registrySettingsWarnings: '无效的端点 URL 已忽略；相应注册源使用默认地址。',
+  registrySettingsUnavailable: '输入框尚未就绪，请重新打开面板管理注册源设置。',
 }
 
 /** Pick a dictionary for one BCP 47 tag, defaulting to English. */

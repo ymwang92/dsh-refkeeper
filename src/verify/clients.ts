@@ -7,6 +7,7 @@
  * failing fixture test instead of a runtime surprise during a capture.
  */
 
+import { DEFAULT_REGISTRY_BASE_URLS, type RegistryId, type RegistryBaseUrls } from '../core/registry-settings.ts'
 import { formatAuthorName } from '../core/text.ts'
 import type { SourceId, SourceRecord } from './types.ts'
 
@@ -22,6 +23,27 @@ export const SOURCE_ORDER: readonly SourceId[] = ['crossref', 'openalex', 'arxiv
  */
 export interface ContactOptions {
   readonly mailto?: string | undefined
+  readonly registryBaseUrls?: Partial<RegistryBaseUrls> | undefined
+}
+
+function registryBase(options: ContactOptions | undefined, id: RegistryId): string {
+  const candidate = options?.registryBaseUrls?.[id]
+  if (typeof candidate === 'string') {
+    try {
+      const parsed = new URL(candidate)
+      if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname !== '' && parsed.username === '' && parsed.password === '' && parsed.search === '' && parsed.hash === '') {
+        return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`
+      }
+    } catch {
+      // Invalid direct options fall back to the compiled-in endpoint. Persisted settings
+      // are validated at their boundary and produce a visible warning there.
+    }
+  }
+  return DEFAULT_REGISTRY_BASE_URLS[id]
+}
+
+function registryEndpoint(options: ContactOptions | undefined, id: RegistryId, path: string): string {
+  return `${registryBase(options, id).replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`
 }
 
 function withMailto(url: string, options: ContactOptions | undefined): string {
@@ -29,6 +51,12 @@ function withMailto(url: string, options: ContactOptions | undefined): string {
   if (mailto === undefined || mailto === '') return url
   const separator = url.includes('?') ? '&' : '?'
   return `${url}${separator}mailto=${encodeURIComponent(mailto)}`
+}
+
+function withPubMedEmail(url: string, options: ContactOptions | undefined): string {
+  const mailto = options?.mailto?.trim()
+  if (mailto === undefined || mailto === '') return url
+  return `${url}&email=${encodeURIComponent(mailto)}`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -75,19 +103,19 @@ function crossrefYear(issued: unknown): number | undefined {
 /* ------------------------------------------------------------------ Crossref */
 
 export function crossrefDoiUrl(doi: string, options?: ContactOptions): string {
-  return withMailto(`https://api.crossref.org/works/${encodeURIComponent(doi)}`, options)
+  return withMailto(registryEndpoint(options, 'crossref', `works/${encodeURIComponent(doi)}`), options)
 }
 
 export function crossrefSearchUrl(query: string, rows = 5, options?: ContactOptions): string {
   return withMailto(
-    `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(query)}&rows=${String(rows)}&select=DOI,title,author,issued,container-title,type,URL,volume,issue,page,publisher,language`,
+    `${registryEndpoint(options, 'crossref', 'works')}?query.bibliographic=${encodeURIComponent(query)}&rows=${String(rows)}&select=DOI,title,author,issued,container-title,type,URL,volume,issue,page,publisher,language`,
     options,
   )
 }
 
 export function dataciteQueryUrl(query: string, options?: ContactOptions): string {
   return withMailto(
-    `https://api.datacite.org/dois?query=${encodeURIComponent(query)}&page[size]=5`,
+    `${registryEndpoint(options, 'datacite', 'dois')}?query=${encodeURIComponent(query)}&page[size]=5`,
     options,
   )
 }
@@ -148,12 +176,12 @@ export function parseCrossrefSearch(raw: unknown): SourceRecord[] {
 /* ------------------------------------------------------------------ OpenAlex */
 
 export function openalexDoiUrl(doi: string, options?: ContactOptions): string {
-  return withMailto(`https://api.openalex.org/works/doi:${encodeURIComponent(doi)}`, options)
+  return withMailto(registryEndpoint(options, 'openalex', `works/doi:${encodeURIComponent(doi)}`), options)
 }
 
 export function openalexSearchUrl(query: string, perPage = 5, options?: ContactOptions): string {
   return withMailto(
-    `https://api.openalex.org/works?search=${encodeURIComponent(query)}&per-page=${String(perPage)}`,
+    `${registryEndpoint(options, 'openalex', 'works')}?search=${encodeURIComponent(query)}&per-page=${String(perPage)}`,
     options,
   )
 }
@@ -207,11 +235,11 @@ export function parseOpenAlexSearch(raw: unknown): SourceRecord[] {
 
 /* --------------------------------------------------------------------- arXiv */
 
-export function arxivSearchUrl(query: string, maxResults = 5): string {
+export function arxivSearchUrl(query: string, maxResults = 5, options?: ContactOptions): string {
   // Callers may pass a bare string or an arXiv field query (`ti:`, `au:`);
   // prefixing `all:` twice would return nothing.
   const scoped = /^[a-z]+:/u.test(query) ? query : `all:${query}`
-  return `https://export.arxiv.org/api/query?search_query=${encodeURIComponent(scoped)}&max_results=${String(maxResults)}`
+  return `${registryEndpoint(options, 'arxiv', 'api/query')}?search_query=${encodeURIComponent(scoped)}&max_results=${String(maxResults)}`
 }
 
 /**
@@ -220,9 +248,9 @@ export function arxivSearchUrl(query: string, maxResults = 5): string {
  * `search_query=all:<id>` goes through the fuzzy text index and can return the
  * wrong paper; `id_list` is the documented exact form.
  */
-export function arxivIdUrl(arxivId: string): string {
+export function arxivIdUrl(arxivId: string, options?: ContactOptions): string {
   const bare = arxivId.replace(/^arxiv:/iu, '').replace(/v\d+$/u, '')
-  return `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(bare)}&max_results=1`
+  return `${registryEndpoint(options, 'arxiv', 'api/query')}?id_list=${encodeURIComponent(bare)}&max_results=1`
 }
 
 function xmlText(block: string, tag: string): string {
@@ -274,8 +302,8 @@ export function parseArxivFeed(xml: string): SourceRecord[] {
 
 /* ------------------------------------------------------------------ DataCite */
 
-export function dataciteDoiUrl(doi: string): string {
-  return `https://api.datacite.org/dois/${encodeURIComponent(doi)}`
+export function dataciteDoiUrl(doi: string, options?: ContactOptions): string {
+  return registryEndpoint(options, 'datacite', `dois/${encodeURIComponent(doi)}`)
 }
 
 export function parseDataciteWork(raw: unknown): SourceRecord | undefined {
@@ -349,25 +377,25 @@ function jsonEnvelope(source: SourceId, body: string): Record<string, unknown> {
   return raw
 }
 
-export function pubmedIdUrl(pmid: string): string {
+export function pubmedIdUrl(pmid: string, options?: ContactOptions): string {
   // Built like the DOI URL helpers: an identifier that cannot resolve is a
   // lookup that comes back empty, not a thrown error. Throwing here aborted
   // the whole verification — and with it the save — when a user typed a
   // PMCID into the PMID box.
-  return `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=${encodeURIComponent(pmid)}&retmode=json&tool=dsh-refkeeper`
+  return withPubMedEmail(`${registryEndpoint(options, 'pubmed', 'entrez/eutils/esummary.fcgi')}?db=pubmed&id=${encodeURIComponent(pmid)}&retmode=json&tool=dsh-refkeeper`, options)
 }
 
-export function pmcSearchUrl(pmcid: string): string {
-  return `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pmc&term=${encodeURIComponent(`${pmcid.toUpperCase()}[pmc]`)}&retmode=json&tool=dsh-refkeeper`
+export function pmcSearchUrl(pmcid: string, options?: ContactOptions): string {
+  return withPubMedEmail(`${registryEndpoint(options, 'pubmed', 'entrez/eutils/esearch.fcgi')}?db=pmc&term=${encodeURIComponent(`${pmcid.toUpperCase()}[pmc]`)}&retmode=json&tool=dsh-refkeeper`, options)
 }
 
-export function pmcSummaryUrl(uid: string): string {
-  return `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pmc&id=${encodeURIComponent(uid)}&retmode=json&tool=dsh-refkeeper`
+export function pmcSummaryUrl(uid: string, options?: ContactOptions): string {
+  return withPubMedEmail(`${registryEndpoint(options, 'pubmed', 'entrez/eutils/esummary.fcgi')}?db=pmc&id=${encodeURIComponent(uid)}&retmode=json&tool=dsh-refkeeper`, options)
 }
 
 export function openlibraryIsbnUrl(isbn: string, options?: ContactOptions): string {
   return withMailto(
-    `https://openlibrary.org/api/books?bibkeys=${encodeURIComponent(`ISBN:${isbn}`)}&format=json&jscmd=data`,
+    `${registryEndpoint(options, 'openlibrary', 'api/books')}?bibkeys=${encodeURIComponent(`ISBN:${isbn}`)}&format=json&jscmd=data`,
     options,
   )
 }

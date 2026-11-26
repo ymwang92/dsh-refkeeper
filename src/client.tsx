@@ -33,8 +33,10 @@ import type { BatchEntry, CaptureBatch } from './core/batch.ts'
 import { parseAuthorLines } from './ui/authors.ts'
 import { cachedCommandSnapshot, entryReasonForMeta, parseManualSaveResult } from './ui/save-result.ts'
 import type { CommandSnapshotCache, ManualSaveResult } from './ui/save-result.ts'
-import { decodeDir } from './core/panel.ts'
+import { decodeDir, decodeRegistrySettings } from './core/panel.ts'
 import type { DirectorySetting } from './core/panel.ts'
+import { DEFAULT_REGISTRY_BASE_URLS, REGISTRY_IDS } from './core/registry-settings.ts'
+import type { NormalizedRegistrySettings, RegistryId, RegistrySettings } from './core/registry-settings.ts'
 import { encodeFlag } from './ui/payload.ts'
 import { stringsFor } from './ui/strings.ts'
 import type { Strings } from './ui/strings.ts'
@@ -264,6 +266,70 @@ function useLatestDir(sessionId: string | undefined, nonce = 0): DirectorySettin
     () => snapshotDir(sessionId, nonce),
     () => undefined,
   )
+}
+
+interface RegistrySettingsWindow {
+  readonly size: number
+  readonly markerIndex: number
+  readonly snapshot: NormalizedRegistrySettings | undefined
+}
+
+const registrySettingsCache = new Map<string, { key: string; value: RegistrySettingsWindow }>()
+
+function latestRegistrySettingsOf(sessionId: string): { index: number; snapshot: NormalizedRegistrySettings } | undefined {
+  const source = sessionsNow()?.binding(sessionId)?.eventSource
+  if (source === undefined) return undefined
+  let found: { index: number; snapshot: NormalizedRegistrySettings } | undefined
+  source.getSnapshot().entries.forEach((entry, index) => {
+    const item = entry as { type?: unknown; event?: { type?: unknown; data?: { text?: unknown } } }
+    if (item.type !== 'event' || item.event?.type !== 'command/done') return
+    const text = item.event.data?.text
+    if (typeof text !== 'string') return
+    const snapshot = decodeRegistrySettings(text)
+    if (snapshot !== undefined) found = { index, snapshot }
+  })
+  return found
+}
+
+function snapshotRegistrySettings(sessionId: string | undefined, nonce: number): RegistrySettingsWindow | undefined {
+  if (sessionId === undefined) return undefined
+  const source = sessionsNow()?.binding(sessionId)?.eventSource
+  if (source === undefined) return undefined
+  const window = source.getSnapshot()
+  const key = `${String(nonce)}:${String(window.revision)}:${String(window.entries.length)}`
+  const cached = registrySettingsCache.get(sessionId)
+  if (cached !== undefined && cached.key === key) return cached.value
+  const latest = latestRegistrySettingsOf(sessionId)
+  const value: RegistrySettingsWindow = {
+    size: window.entries.length,
+    markerIndex: latest?.index ?? -1,
+    snapshot: latest?.snapshot,
+  }
+  registrySettingsCache.set(sessionId, { key, value })
+  return value
+}
+
+function useLatestRegistrySettings(sessionId: string | undefined, nonce = 0): RegistrySettingsWindow | undefined {
+  return React.useSyncExternalStore(
+    (listener) => subscribeBatch(sessionId, listener),
+    () => snapshotRegistrySettings(sessionId, nonce),
+    () => undefined,
+  )
+}
+
+const INITIAL_REGISTRY_SETTINGS: RegistrySettings = {
+  registryBaseUrls: DEFAULT_REGISTRY_BASE_URLS,
+  mailto: '',
+  privateMode: false,
+}
+
+const REGISTRY_LABELS: Readonly<Record<RegistryId, (text: Strings) => string>> = {
+  crossref: (text) => text.registryCrossref,
+  datacite: (text) => text.registryDatacite,
+  openalex: (text) => text.registryOpenalex,
+  arxiv: (text) => text.registryArxiv,
+  pubmed: (text) => text.registryPubmed,
+  openlibrary: (text) => text.registryOpenlibrary,
 }
 
 const STATUS_TONE: Record<BatchEntry['status'], string> = {
@@ -1042,6 +1108,12 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
   const [nonce, setNonce] = React.useState(0)
   const batch = useLatestBatch(props.sessionId, nonce)
   const dir = useLatestDir(props.sessionId, nonce)
+  const latestRegistrySettings = useLatestRegistrySettings(props.sessionId, nonce)
+  const [registrySettingsDraft, setRegistrySettingsDraft] = React.useState<RegistrySettings>(INITIAL_REGISTRY_SETTINGS)
+  const [settingsOpen, setSettingsOpen] = React.useState(false)
+  const [settingsRequest, setSettingsRequest] = React.useState<{ readonly baselineSize: number; readonly action: 'load' | 'save' } | undefined>(undefined)
+  const [settingsMarkerSeen, setSettingsMarkerSeen] = React.useState('')
+  const [settingsMessage, setSettingsMessage] = React.useState('')
   const rememberedDir = dir === undefined || dir.dir === null ? '' : dir.dir
   // The typed path follows what the host last confirmed, but the user keeps
   // whatever they are editing until they save or clear it.
@@ -1056,6 +1128,23 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
   React.useEffect(() => {
     if (!current.open) setView({ kind: 'list' })
   }, [current.open])
+  React.useEffect(() => {
+    const settingsWindow = latestRegistrySettings
+    if (settingsWindow?.snapshot === undefined) return
+    const snapshot = settingsWindow.snapshot
+    const markerKey = `${String(settingsWindow.markerIndex)}:${JSON.stringify(snapshot)}`
+    if (markerKey === settingsMarkerSeen) return
+    setSettingsMarkerSeen(markerKey)
+    setRegistrySettingsDraft(snapshot.settings)
+    if (settingsRequest !== undefined && settingsWindow.markerIndex >= settingsRequest.baselineSize) {
+      setSettingsRequest(undefined)
+      setSettingsMessage(snapshot.warnings.length > 0
+        ? text.registrySettingsWarnings
+        : settingsRequest.action === 'save' ? text.registrySettingsSaved : '')
+    } else if (settingsRequest === undefined) {
+      setSettingsMessage(snapshot.warnings.length > 0 ? text.registrySettingsWarnings : '')
+    }
+  }, [latestRegistrySettings, settingsMarkerSeen, settingsRequest, text])
   const [ticks, setTicks] = React.useState<{ key: string; picked: Record<string, boolean> }>({
     key: '',
     picked: {},
@@ -1163,6 +1252,112 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
       label,
     )
 
+  const submitRegistrySettings = (action: 'load' | 'save'): void => {
+    const baselineSize = latestRegistrySettings?.size ?? 0
+    const command = action === 'load'
+      ? '/refs settings'
+      : `/refs settings ${encodeFlag('payload', registrySettingsDraft)}`
+    if (!dispatch(props.inputActions, command)) {
+      setSettingsRequest(undefined)
+      setSettingsMessage(text.registrySettingsUnavailable)
+      return
+    }
+    setSettingsRequest({ baselineSize, action })
+    setSettingsMessage(text.registrySettingsLoading)
+  }
+
+  const registrySnapshot = latestRegistrySettings?.snapshot
+  const settingsDisabled = settingsRequest !== undefined || registrySnapshot === undefined
+  const settingsFields = REGISTRY_IDS.map((id) => {
+    const custom = registrySnapshot?.customRegistryIds.includes(id) ?? false
+    return React.createElement(
+      'label',
+      { key: id, style: { display: 'flex', flexDirection: 'column', gap: '3px', minWidth: 0 } },
+      React.createElement(
+        'span',
+        { style: { ...ROW_STYLE, justifyContent: 'space-between', gap: '6px' } },
+        REGISTRY_LABELS[id](text),
+        React.createElement('span', { style: { opacity: 0.65, flexShrink: 0 } }, registrySnapshot === undefined
+          ? text.registrySettingsLoading
+          : custom ? text.registryCustomStatus : text.registryDefaultStatus),
+      ),
+      React.createElement('input', {
+        type: 'url',
+        value: registrySettingsDraft.registryBaseUrls[id],
+        disabled: settingsDisabled,
+        spellCheck: false,
+        'aria-label': REGISTRY_LABELS[id](text),
+        onChange: (event: React.ChangeEvent<HTMLInputElement>) => {
+          const value = event.target.value
+          setRegistrySettingsDraft((previous) => ({
+            ...previous,
+            registryBaseUrls: { ...previous.registryBaseUrls, [id]: value },
+          }))
+        },
+        style: { ...FIELD_STYLE, width: '100%', boxSizing: 'border-box' },
+      }),
+    )
+  })
+  const registrySettingsPanel = React.createElement(
+    'div',
+    { style: { display: 'flex', flexDirection: 'column', gap: '8px', paddingTop: '8px', overflowY: 'auto', minHeight: 0 } },
+    React.createElement('div', { style: { fontSize: '12px', opacity: 0.75 } }, text.registrySettingsHint),
+    ...settingsFields,
+    React.createElement(
+      'label',
+      { style: { display: 'flex', flexDirection: 'column', gap: '3px' } },
+      React.createElement('span', null, text.registryMailto),
+      React.createElement('input', {
+        type: 'email',
+        value: registrySettingsDraft.mailto,
+        disabled: settingsDisabled,
+        spellCheck: false,
+        'aria-label': text.registryMailto,
+        onChange: (event: React.ChangeEvent<HTMLInputElement>) => {
+          const value = event.target.value
+          setRegistrySettingsDraft((previous) => ({ ...previous, mailto: value }))
+        },
+        style: { ...FIELD_STYLE, width: '100%', boxSizing: 'border-box' },
+      }),
+    ),
+    React.createElement(
+      'label',
+      { style: { ...ROW_STYLE, alignItems: 'flex-start', gap: '6px' } },
+      React.createElement('input', {
+        type: 'checkbox',
+        checked: registrySettingsDraft.privateMode,
+        disabled: settingsDisabled,
+        onChange: (event: React.ChangeEvent<HTMLInputElement>) => {
+          const privateMode = event.target.checked
+          setRegistrySettingsDraft((previous) => ({ ...previous, privateMode }))
+        },
+      }),
+      React.createElement(
+        'span',
+        null,
+        React.createElement('strong', null, text.registryPrivateMode),
+        React.createElement('div', { style: { fontSize: '12px', opacity: 0.75, marginTop: '3px' } }, text.registryPrivateModeHelp),
+      ),
+    ),
+    settingsMessage === ''
+      ? null
+      : React.createElement('div', { style: { color: settingsMessage === text.registrySettingsSaved ? UI_TOKENS.color.success : UI_TOKENS.color.warning } }, settingsMessage),
+    React.createElement(
+      'div',
+      { style: { ...ROW_STYLE, justifyContent: 'flex-end', gap: '6px' } },
+      React.createElement(
+        'button',
+        { type: 'button', disabled: settingsRequest !== undefined, onClick: () => submitRegistrySettings('load'), style: { ...BASE_BUTTON, opacity: settingsRequest !== undefined ? 0.6 : 1 } },
+        text.registrySettingsReload,
+      ),
+      React.createElement(
+        'button',
+        { type: 'button', disabled: settingsDisabled, onClick: () => submitRegistrySettings('save'), style: { ...BASE_BUTTON, opacity: settingsDisabled ? 0.6 : 1 } },
+        text.registrySettingsSave,
+      ),
+    ),
+  )
+
   return ReactDOM.createPortal(
     React.createElement(
       'section',
@@ -1181,12 +1376,33 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
             { style: { ...ROW_STYLE, justifyContent: 'space-between', flexShrink: 0 } },
             React.createElement('strong', null, `❝ ${text.heading}`),
             React.createElement(
-              'button',
-              { type: 'button', onClick: () => setState({ open: false }), style: { ...BASE_BUTTON, height: '24px', padding: '0 6px' } },
-              text.close,
+              'div',
+              { style: { ...ROW_STYLE, gap: '4px', flexShrink: 0 } },
+              React.createElement(
+                'button',
+                {
+                  type: 'button',
+                  'aria-pressed': settingsOpen,
+                  onClick: () => {
+                    const next = !settingsOpen
+                    setSettingsOpen(next)
+                    if (next) submitRegistrySettings('load')
+                  },
+                  style: { ...BASE_BUTTON, height: '24px', padding: '0 6px' },
+                },
+                text.registrySettingsHeading,
+              ),
+              React.createElement(
+                'button',
+                { type: 'button', onClick: () => setState({ open: false }), style: { ...BASE_BUTTON, height: '24px', padding: '0 6px' } },
+                text.close,
+              ),
             ),
           ),
-          React.createElement(
+          settingsOpen ? registrySettingsPanel : null,
+          settingsOpen
+            ? null
+            : React.createElement(
             'div',
             { style: { ...ROW_STYLE, marginTop: '6px', flexShrink: 0 } },
             React.createElement('span', { style: { opacity: 0.7 } }, `${text.scopeLabel}:`),
@@ -1210,27 +1426,31 @@ function CapturePanel(props: PanelProps): React.ReactElement | null {
           ),
         )
       : null,
-    React.createElement(PanelView, {
-      view,
-      onViewChange: setView,
-      batch,
-      text,
-      notice,
-      isPicked,
-      onToggle,
-      onEdit,
-      onPromote,
-      titleOf,
-      pickedCount: pickedIds.length,
-      onRefresh: () => setNonce((value) => value + 1),
-      sessionId: props.sessionId,
-      onManualSave: (_entry, payload) => {
-        const submitted = dispatch(props.inputActions, manualSaveCommand(payload))
-        setNotice(submitted ? '' : text.unavailable)
-        return submitted
-      },
-    }),
-    view.kind === 'list'
+    React.createElement(
+      'div',
+      { style: { display: settingsOpen ? 'none' : 'contents' } },
+      React.createElement(PanelView, {
+        view,
+        onViewChange: setView,
+        batch,
+        text,
+        notice,
+        isPicked,
+        onToggle,
+        onEdit,
+        onPromote,
+        titleOf,
+        pickedCount: pickedIds.length,
+        onRefresh: () => setNonce((value) => value + 1),
+        sessionId: props.sessionId,
+        onManualSave: (_entry, payload) => {
+          const submitted = dispatch(props.inputActions, manualSaveCommand(payload))
+          setNotice(submitted ? '' : text.unavailable)
+          return submitted
+        },
+      }),
+    ),
+    view.kind === 'list' && !settingsOpen
       ? React.createElement(
           React.Fragment,
           null,

@@ -3,7 +3,9 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 
-import { encodeDir } from '../core/panel.ts'
+import { encodeDir, encodeRegistrySettings } from '../core/panel.ts'
+import { REGISTRY_IDS, normalizeRegistrySettings } from '../core/registry-settings.ts'
+import type { NormalizedRegistrySettings, RegistryId, RegistrySettings } from '../core/registry-settings.ts'
 import { stripMarkup } from '../core/text.ts'
 import { EXPORT_EXTENSIONS, renderExport } from '../export/index.ts'
 import type { ExportFormat } from '../export/index.ts'
@@ -41,6 +43,7 @@ export const STORE_USAGE = [
   '  /refs export [--format=bibtex|ris|both] [--out=path] [--include-quarantine]',
   '  /refs export [--ids=id,id] [--choose-dir] [--all]  panel tick-box selection',
   '  /refs dir [--set=<base64url(path)>|--clear]         default export folder',
+  '  /refs settings [--payload=<base64url(json)>]         registry endpoints/privacy',
   'export defaults to the references captured by the last `/refs capture --save`;',
   'add --all to export the whole library instead. Without --out, files go to the',
   'folder set by `/refs dir --set=…`, else to refs/exports/ in the workspace.',
@@ -55,7 +58,7 @@ export const STORE_USAGE = [
  * here but missing from that routing list reaches `runRefsCommand` and is
  * reported as `unknown subcommand`, which is exactly what happened to `dir`.
  */
-export const STORE_SUBCOMMANDS = ['save', 'export', 'list', 'remove', 'edit', 'enrich', 'dir', 'promote'] as const
+export const STORE_SUBCOMMANDS = ['save', 'export', 'list', 'remove', 'edit', 'enrich', 'dir', 'settings', 'promote'] as const
 
 export type StoreSubcommand = (typeof STORE_SUBCOMMANDS)[number]
 
@@ -278,6 +281,14 @@ export function parseStoreCommand(raw: string): ParsedStoreCommand | { readonly 
   }
   out.targets = targets
 
+  if (sub === 'settings') {
+    if (tokens.length === 0) return out
+    if (tokens.length !== 1 || !tokens[0]?.startsWith('--payload=') || out.payload === '') {
+      return { error: 'settings takes no arguments or one --payload=<base64url(json)>' }
+    }
+    return out
+  }
+
   if (sub === 'save' && out.payload === '' && out.json === '') {
     return { error: 'save needs a JSON payload (--payload=<base64url> or --json=<json>)' }
   }
@@ -382,6 +393,8 @@ export interface StoreCommandDeps {
   readonly workspace: string
   readonly verify?: ((ref: StoredReference) => Promise<VerificationReport>) | undefined
   readonly allowManualConfirm?: boolean | undefined
+  /** When true, saves skip registry verification and persist as manual. */
+  readonly privateMode?: boolean | undefined
   readonly now?: (() => string) | undefined
   readonly directoryPicker?: DirectoryPickerControllerLike | undefined
   readonly fs?: HostFsLike | undefined
@@ -550,7 +563,7 @@ export async function saveFromPayload(
   }
 
   let report: VerificationReport | undefined
-  if (deps.verify) {
+  if (deps.verify && deps.privateMode !== true) {
     report = await deps.verify(ref)
   }
   const status = report?.status ?? (deps.allowManualConfirm ? 'manual' : undefined)
@@ -564,7 +577,13 @@ export async function saveFromPayload(
   const verification: RefVerification =
     report !== undefined
       ? verificationOf(ref, report, now)
-      : { status: 'manual', checkedAt: now, note: 'stored without registry verification (manual confirmation)' }
+      : {
+          status: 'manual',
+          checkedAt: now,
+          note: deps.privateMode === true
+            ? 'stored without registry verification (private mode; not verified)'
+            : 'stored without registry verification (manual confirmation)',
+        }
   const stored: StoredReference = { ...ref, verification }
 
   const accepted = verification.status === 'verified' || verification.status === 'manual'
@@ -581,6 +600,7 @@ export async function saveFromPayload(
         text: [
           `${outcome.replaced ? 'updated' : 'saved'} ${stored.id} → refs/refs.json`,
           `verification: ${verification.status}${verification.passed !== undefined ? ` ${String(verification.passed)}/3` : ''}`,
+          ...(deps.privateMode === true ? ['not verified: private mode prevented registry requests.'] : []),
           `library: ${String(outcome.state.references.length)} reference(s)`,
         ].join('\n'),
       }
@@ -601,6 +621,7 @@ export async function saveFromPayload(
         text: [
           `already in the library ${stored.id}; nothing added to refs/quarantine.json`,
           `verification: ${verification.status}${verification.passed !== undefined ? ` ${String(verification.passed)}/3` : ''}`,
+          ...(deps.privateMode === true ? ['not verified: private mode prevented registry requests.'] : []),
           'This work is in refs/refs.json under an equivalent identity, so no ⚠ copy was created.',
         ].join('\n'),
       }
@@ -669,22 +690,139 @@ interface ExportScope {
 export interface StoreSettings {
   /** Absolute folder `/refs export` writes into when no `--out` is given. */
   readonly defaultExportDir?: string
+  readonly registryBaseUrls?: RegistrySettings['registryBaseUrls']
+  readonly mailto?: string
+  readonly privateMode?: boolean
+}
+
+interface StoreSettingsState {
+  readonly settings: StoreSettings
+  readonly registry: NormalizedRegistrySettings
 }
 
 function settingsPath(workspace: string): string {
   return join(storePaths(workspace).dir, 'settings.json')
 }
 
-async function readSettings(workspace: string): Promise<StoreSettings> {
+async function readSettingsState(workspace: string): Promise<StoreSettingsState> {
+  let text: string
   try {
-    const parsed: unknown = JSON.parse(await readFile(settingsPath(workspace), 'utf8'))
-    if (typeof parsed !== 'object' || parsed === null) return {}
-    const dir = (parsed as { defaultExportDir?: unknown }).defaultExportDir
-    // A malformed settings file must not break capture or export: fall back to
-    // the workspace's refs/exports/ rather than failing the command.
-    return typeof dir === 'string' && dir !== '' ? { defaultExportDir: dir } : {}
+    text = await readFile(settingsPath(workspace), 'utf8')
+  } catch (error) {
+    const missing = typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
+    const defaults = normalizeRegistrySettings({})
+    return missing
+      ? { settings: {}, registry: defaults }
+      : { settings: {}, registry: { ...defaults, warnings: ['settings-read-error'] } }
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text) as unknown
   } catch {
-    return {}
+    const defaults = normalizeRegistrySettings({})
+    return { settings: {}, registry: { ...defaults, warnings: ['invalid-settings-json'] } }
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    const defaults = normalizeRegistrySettings({})
+    return { settings: {}, registry: { ...defaults, warnings: ['invalid-settings-shape'] } }
+  }
+  const record = parsed as Record<string, unknown>
+  const normalized = normalizeRegistrySettings(record)
+  const dir = record.defaultExportDir
+  return {
+    settings: {
+      ...(typeof dir === 'string' && dir !== '' ? { defaultExportDir: dir } : {}),
+      ...(Object.prototype.hasOwnProperty.call(record, 'registryBaseUrls')
+        ? { registryBaseUrls: normalized.settings.registryBaseUrls }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(record, 'mailto')
+        ? { mailto: normalized.settings.mailto }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(record, 'privateMode')
+        ? { privateMode: normalized.settings.privateMode }
+        : {}),
+    },
+    registry: normalized,
+  }
+}
+
+async function readSettings(workspace: string): Promise<StoreSettings> {
+  return (await readSettingsState(workspace)).settings
+}
+
+export async function readRegistrySettings(workspace: string): Promise<NormalizedRegistrySettings> {
+  return (await readSettingsState(workspace)).registry
+}
+
+function registrySettingsText(snapshot: NormalizedRegistrySettings): string[] {
+  return [
+    snapshot.settings.privateMode
+      ? 'private mode: enabled; registry requests are disabled, and captures are manual/not verified.'
+      : 'private mode: disabled; verification may contact the configured registries.',
+    `mailto: ${snapshot.settings.mailto || '(not set)'}`,
+    ...REGISTRY_IDS.map((id: RegistryId) =>
+      `${id}: ${snapshot.settings.registryBaseUrls[id]} (${snapshot.customRegistryIds.includes(id) ? 'custom' : 'default'})`,
+    ),
+    ...snapshot.warnings.map((warning) => `warning: ${warning}; invalid values were ignored.`),
+  ]
+}
+
+async function runRegistrySettingsCommand(payload: string, workspace: string): Promise<StoreCommandResult> {
+  const current = await readSettingsState(workspace)
+  let input: Record<string, unknown> = {}
+  if (payload !== '') {
+    try {
+      const decoded: unknown = JSON.parse(decodePayload(payload))
+      if (typeof decoded !== 'object' || decoded === null || Array.isArray(decoded)) {
+        return { kind: 'error', text: 'settings payload must be a JSON object' }
+      }
+      input = decoded as Record<string, unknown>
+    } catch {
+      return { kind: 'error', text: 'settings payload is not valid base64url-encoded JSON' }
+    }
+  }
+
+  const inputHas = (key: string) => Object.prototype.hasOwnProperty.call(input, key)
+  const rawBases = input.registryBaseUrls
+  const inputBases = typeof rawBases === 'object' && rawBases !== null && !Array.isArray(rawBases)
+    ? rawBases as Record<string, unknown>
+    : {}
+  const warnings = [...current.registry.warnings]
+  if (inputHas('registryBaseUrls') && (typeof rawBases !== 'object' || rawBases === null || Array.isArray(rawBases))) {
+    warnings.push('invalid-registry-base-urls')
+  }
+  const normalized = normalizeRegistrySettings({
+    registryBaseUrls: { ...current.registry.settings.registryBaseUrls, ...inputBases },
+    mailto: inputHas('mailto') ? input.mailto : current.registry.settings.mailto,
+    privateMode: inputHas('privateMode') ? input.privateMode : current.registry.settings.privateMode,
+  })
+  const snapshot: NormalizedRegistrySettings = {
+    ...normalized,
+    warnings: [...new Set([...warnings, ...normalized.warnings])],
+  }
+
+  if (payload !== '') {
+    await writeSettings(workspace, {
+      ...current.settings,
+      ...normalized.settings,
+    })
+  }
+
+  return {
+    kind: 'success',
+    text: [
+      payload === '' ? 'registry settings loaded.' : 'registry settings saved.',
+      ...registrySettingsText(snapshot),
+      encodeRegistrySettings(snapshot),
+    ].join('\n'),
+  }
+}
+
+function withoutDefaultExportDir(settings: StoreSettings): StoreSettings {
+  return {
+    ...(settings.registryBaseUrls === undefined ? {} : { registryBaseUrls: settings.registryBaseUrls }),
+    ...(settings.mailto === undefined ? {} : { mailto: settings.mailto }),
+    ...(settings.privateMode === undefined ? {} : { privateMode: settings.privateMode }),
   }
 }
 
@@ -1059,7 +1197,7 @@ async function rememberDirectory(
         }
       }
     }
-    await writeSettings(deps.workspace, { defaultExportDir: canonical })
+    await writeSettings(deps.workspace, { ...(await readSettings(deps.workspace)), defaultExportDir: canonical })
     return {
       kind: 'success',
       text: [
@@ -1082,7 +1220,7 @@ export async function setDefaultDirectory(
   deps: StoreCommandDeps,
 ): Promise<StoreCommandResult> {
   if (options.clear === true) {
-    await writeSettings(deps.workspace, {})
+    await writeSettings(deps.workspace, withoutDefaultExportDir(await readSettings(deps.workspace)))
     return {
       kind: 'success',
       text: [
@@ -1702,6 +1840,7 @@ export async function runStoreCommand(
   const parsed = parseStoreCommand(raw)
   if ('error' in parsed) return { kind: 'error', text: `${parsed.error}\n${STORE_USAGE}` }
   try {
+    if (parsed.sub === 'settings') return await runRegistrySettingsCommand(parsed.payload, deps.workspace)
     if (parsed.sub === 'save') return await runSave(parsed, deps)
     if (parsed.sub === 'edit') {
       let patch: Record<string, unknown>

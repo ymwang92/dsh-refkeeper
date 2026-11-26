@@ -89,6 +89,61 @@ function fencingFs(writes: Write[], inside: boolean): HostFsLike {
   }
 }
 
+describe('registry settings', () => {
+  it('persists endpoint overrides and private mode while preserving the export directory', async () => {
+    const { encodeFlag } = await import('../src/ui/payload.ts')
+    const { decodeRegistrySettings } = await import('../src/core/panel.ts')
+    const exportDir = join(workspace, 'exports')
+    await writeFile(join(workspace, 'refs', 'settings.json'), JSON.stringify({ defaultExportDir: exportDir }), 'utf8')
+
+    const payload = encodeFlag('payload', {
+      registryBaseUrls: {
+        crossref: 'https://crossref.proxy.example/api',
+        datacite: 'file:///tmp/not-a-registry',
+      },
+      mailto: 'refs@example.org',
+      privateMode: true,
+    })
+    const result = await runStoreCommand(`settings ${payload}`, { workspace, now: () => NOW })
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('private mode: enabled')
+    expect(result.text).toContain('invalid-registry-base-url:datacite')
+
+    const decoded = decodeRegistrySettings(result.text)
+    expect(decoded?.settings.privateMode).toBe(true)
+    expect(decoded?.settings.mailto).toBe('refs@example.org')
+    expect(decoded?.settings.registryBaseUrls.crossref).toBe('https://crossref.proxy.example/api')
+    expect(decoded?.settings.registryBaseUrls.datacite).toBe('https://api.datacite.org')
+    const onDisk = JSON.parse(await readFile(join(workspace, 'refs', 'settings.json'), 'utf8')) as Record<string, unknown>
+    expect(onDisk.defaultExportDir).toBe(exportDir)
+    expect(onDisk.privateMode).toBe(true)
+    expect(onDisk.mailto).toBe('refs@example.org')
+  })
+
+  it('skips registry verification for private captures and labels them not verified', async () => {
+    let verifyCalls = 0
+    const result = await saveFromPayload(
+      { title: 'Private mode capture', authors: ['Example, A.'], year: 2024, type: 'journalArticle' },
+      {
+        workspace,
+        now: () => NOW,
+        privateMode: true,
+        allowManualConfirm: true,
+        verify: async () => {
+          verifyCalls += 1
+          return { status: 'warning' as const, reasons: ['unexpected-request'] } as never
+        },
+      },
+    )
+    expect(verifyCalls).toBe(0)
+    expect(result.kind).toBe('success')
+    expect(result.text).toContain('not verified: private mode prevented registry requests')
+    const saved = (await loadStore(workspace)).state.references.find((entry) => entry.title === 'Private mode capture')
+    expect(saved?.verification.status).toBe('manual')
+    expect(saved?.verification.note).toContain('not verified')
+  })
+})
+
 describe('CSL-JSON export format', () => {
   it('accepts CSL-JSON without changing the legacy both default', () => {
     expect(parseStoreCommand('export')).toMatchObject({ sub: 'export', format: 'both' })

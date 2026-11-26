@@ -11,6 +11,7 @@ import type { VerifyOutcome } from '../verify/lookup.ts'
 
 export interface VerifyCommandDeps {
   readonly verify: (claim: VerificationClaim) => Promise<VerifyOutcome>
+  readonly privateMode?: boolean
 }
 
 export const VERIFY_USAGE = [
@@ -114,10 +115,13 @@ const STATUS_LABEL: Record<VerificationReport['status'], string> = {
 }
 
 /** Human-readable verdict, shared by the command and the tool renderer. */
-export function renderVerify(outcome: VerifyOutcome): string {
+export function renderVerify(outcome: VerifyOutcome, privateMode = false): string {
   const { report } = outcome
+  const status = privateMode && report.status === 'unverified'
+    ? '⚠ unverified — private mode prevented registry requests'
+    : STATUS_LABEL[report.status]
   const lines = [
-    `dsh-refkeeper verify — ${STATUS_LABEL[report.status]}`,
+    `dsh-refkeeper verify — ${status}`,
     `passed ${String(report.passed)}/3 · sources: ${report.sources.length === 0 ? 'none' : report.sources.join(', ')}${report.matchedSource === undefined ? '' : ` · matched ${report.matchedSource}`}`,
     condition('title ', report.title),
     condition('year  ', report.year),
@@ -149,8 +153,19 @@ export async function runVerifyCommand(
     authors: parsed.authors,
   }
   const outcome = await deps.verify(claim)
+  const privateNotice = 'Private mode prevented registry requests; this result is not verified.'
   if (parsed.json) {
-    return { kind: 'success', text: JSON.stringify({ report: outcome.report, records: outcome.lookup.records }, null, 2) }
+    return {
+      kind: 'success',
+      text: JSON.stringify({
+        report: outcome.report,
+        records: outcome.lookup.records,
+        ...(deps.privateMode === true ? { privateMode: true, notice: privateNotice } : {}),
+      }, null, 2),
+    }
   }
-  return { kind: 'success', text: renderVerify(outcome) }
+  return {
+    kind: 'success',
+    text: `${renderVerify(outcome, deps.privateMode === true)}${deps.privateMode === true ? `\n${privateNotice}` : ''}`,
+  }
 }

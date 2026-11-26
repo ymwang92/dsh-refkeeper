@@ -12,6 +12,7 @@ import {
   pmcSearchUrl,
   pubmedIdUrl,
 } from '../src/verify/clients.ts'
+import { DEFAULT_REGISTRY_BASE_URLS } from '../src/core/registry-settings.ts'
 import { LookupCache, lookupRecords, verifyCandidate } from '../src/verify/lookup.ts'
 import type { Fetcher, HttpResult, LookupIdentity } from '../src/verify/lookup.ts'
 
@@ -74,6 +75,41 @@ const candidate = {
 }
 
 describe('lookupRecords', () => {
+  it('uses an HTTP(S) custom base URL for the matching registry only', async () => {
+    const urls: string[] = []
+    const fetcher: Fetcher = async (url) => {
+      urls.push(url)
+      return respond(404, 'not found')
+    }
+    const lookup = await lookupRecords(
+      { doi: '10.1000/abc' },
+      {
+        fetcher,
+        retries: 0,
+        cache: new LookupCache(),
+        registryBaseUrls: { ...DEFAULT_REGISTRY_BASE_URLS, crossref: 'https://crossref.proxy.example/api' },
+      },
+    )
+    expect(lookup.records).toEqual([])
+    expect(urls.some((url) => url.startsWith('https://crossref.proxy.example/api/works/'))).toBe(true)
+    expect(urls.some((url) => url.includes('api.openalex.org'))).toBe(true)
+    expect(urls.some((url) => url.includes('api.datacite.org'))).toBe(true)
+  })
+
+  it('does not create tasks, read cache, or fetch when private mode is enabled', async () => {
+    let calls = 0
+    const result = await lookupRecords(
+      { doi: '10.1000/abc' },
+      {
+        privateMode: true,
+        fetcher: async () => { calls += 1; return respond(200, crossrefEnvelope) },
+        cache: new LookupCache(),
+      },
+    )
+    expect(calls).toBe(0)
+    expect(result).toEqual({ records: [], errors: [], timedOut: false, answered: [] })
+  })
+
   it('queries the DOI registries and keeps partial results', async () => {
     const fetcher = routed([
       { match: 'api.crossref.org', reply: () => respond(200, crossrefEnvelope) },

@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import type { Candidate, ModelCandidateInput } from './core/candidates.ts'
 import { candidateFromModel, mergeCandidates, rankCandidates, sanitizeEvidence } from './core/candidates.ts'
 import { describeScope, parseScope } from './core/scope.ts'
+import { normalizeRegistrySettings } from './core/registry-settings.ts'
 import { captureWindowNotice } from './core/batch.ts'
 import { writeBatch } from './host/capture-batch.ts'
 import type { CaptureBatch } from './host/capture-batch.ts'
@@ -21,7 +22,7 @@ import type { SessionLike, SessionQueryLike } from './host/session-read.ts'
 import type { SaveSummary } from './host/refs-command.ts'
 import { collectCapture, parseRefsCommand, runRefsCommand } from './host/refs-command.ts'
 import { renderVerify, runVerifyCommand } from './host/verify-command.ts'
-import { exportLibrary, isStoreSubcommand, runStoreCommand, saveFromPayload, verificationClaimOf } from './host/store-command.ts'
+import { exportLibrary, isStoreSubcommand, readRegistrySettings, runStoreCommand, saveFromPayload, verificationClaimOf } from './host/store-command.ts'
 import type { DirectoryPickerControllerLike, HostFsLike, StoreCommandDeps } from './host/store-command.ts'
 import { LookupCache, verifyCandidate } from './verify/lookup.ts'
 import type { VerificationClaim } from './verify/lookup.ts'
@@ -366,7 +367,7 @@ export const refVerifyTool = defineTool({
       ]
     },
   },
-  async execute(args): Promise<VerifyToolResult> {
+  async execute(args, exec): Promise<VerifyToolResult> {
     if (
       (args.title ?? '') === '' &&
       (args.doi ?? '') === '' &&
@@ -389,6 +390,13 @@ export const refVerifyTool = defineTool({
         note: 'Nothing was queried: the claim had no identity.',
       }
     }
+    const session = exec?.agent?.session as unknown as
+      | { readonly header?: { readonly cwd?: string } }
+      | undefined
+    const cwd = workspaceOf(session)
+    const config = cwd === ''
+      ? normalizeRegistrySettings({})
+      : await readRegistrySettings(cwd)
     const outcome = await verifyCandidate(
       {
         title: args.title,
@@ -399,15 +407,24 @@ export const refVerifyTool = defineTool({
         pmid: args.pmid,
         pmcid: args.pmcid,
       },
-      { cache: verifyCache },
+      {
+        cache: verifyCache,
+        mailto: config.settings.mailto,
+        registryBaseUrls: config.settings.registryBaseUrls,
+        privateMode: config.settings.privateMode,
+      },
     )
     const report = outcome.report
-    const note =
-      report.status === 'verified'
+    const note = config.settings.privateMode
+      ? 'Private mode prevented registry requests; this result is not verified and does not indicate whether the citation is correct.'
+      : report.status === 'verified'
         ? 'All three conditions passed against a live registry; this reference may enter the table.'
         : report.status === 'unverified'
           ? 'The registries could not be reached; this is not evidence the citation is wrong. Retry later.'
           : 'Kept out of the main table: the claim is not confirmed by a registry (⚠ region).'
+    const warnings = config.warnings.length > 0
+      ? `\nRegistry settings warning: ${config.warnings.join(', ')}; defaults were used for invalid values.`
+      : ''
     return {
       status: report.status,
       passed: report.passed,
@@ -415,7 +432,7 @@ export const refVerifyTool = defineTool({
       partial: report.partial,
       reasonsJson: JSON.stringify(report.reasons),
       reportJson: JSON.stringify({ report, records: outcome.lookup.records }),
-      note,
+      note: `${note}${warnings}`,
     }
   },
 })
@@ -476,7 +493,7 @@ function optionalService<T>(
   }
 }
 
-function storeDeps(cwd: string, signal?: AbortSignal): StoreCommandDeps {
+async function storeDeps(cwd: string, signal?: AbortSignal): Promise<StoreCommandDeps> {
   const picker = optionalService<DirectoryPickerControllerLike>(
     'directoryPickerController',
     directoryPickerController,
@@ -487,17 +504,23 @@ function storeDeps(cwd: string, signal?: AbortSignal): StoreCommandDeps {
   const fs = optionalService<HostFsLike>('fs', hostFs, (value) => {
     hostFs = value
   })
+  const config = cwd === '' ? normalizeRegistrySettings({}) : await readRegistrySettings(cwd)
+  const privateMode = config.settings.privateMode
+  const verificationOptions = {
+    cache: verifyCache,
+    mailto: config.settings.mailto,
+    registryBaseUrls: config.settings.registryBaseUrls,
+    privateMode,
+  }
   return {
     workspace: cwd,
     ...(picker === undefined ? {} : { directoryPicker: picker }),
     ...(fs === undefined ? {} : { fs }),
     ...(signal === undefined ? {} : { signal }),
-    // Manual confirmation stays off in the shipped host: it writes an
-    // unverified entry into the main table. Exports do label it (BibTeX note,
-    // RIS `N1`, annotated.md `⚑ manual`), so the switch is safe to flip later,
-    // but not before the GUI can show that label to the user.
-    allowManualConfirm: false,
+    privateMode,
+    allowManualConfirm: privateMode,
     resolveIdentifiers: async (doi, arxivId, pmid, pmcid, reportNumber, isbn, url) => {
+      if (privateMode) return undefined
       if (doi === '' && arxivId === '' && pmid === '' && pmcid === '' && isbn === '' && reportNumber === '') return undefined
       const outcome = await verifyCandidate(
         {
@@ -509,7 +532,7 @@ function storeDeps(cwd: string, signal?: AbortSignal): StoreCommandDeps {
           ...(isbn === '' ? {} : { isbn }),
           ...(url === '' ? {} : { url }),
         },
-        { cache: verifyCache },
+        verificationOptions,
       )
       const wanted = doi.toLowerCase()
       const best =
@@ -521,7 +544,7 @@ function storeDeps(cwd: string, signal?: AbortSignal): StoreCommandDeps {
       return best
     },
     verify: async (ref) => {
-      const outcome = await verifyCandidate(verificationClaimOf(ref), { cache: verifyCache })
+      const outcome = await verifyCandidate(verificationClaimOf(ref), verificationOptions)
       return outcome.report
     },
   }
@@ -600,7 +623,7 @@ export const refSaveTool = defineTool({
     },
   },
   async execute(args, exec): Promise<RefSaveToolResult> {
-    const session = exec.agent?.session as unknown as
+    const session = exec?.agent?.session as unknown as
       | { readonly header?: { readonly cwd?: string } }
       | undefined
     const cwd = workspaceOf(session)
@@ -659,7 +682,7 @@ export const refSaveTool = defineTool({
         Object.entries(ids).filter(([, value]) => value !== undefined && value !== ''),
       ),
     }
-    const result = await saveFromPayload(withIds, storeDeps(cwd))
+    const result = await saveFromPayload(withIds, await storeDeps(cwd))
     return {
       accepted: result.kind === 'success',
       status: result.status ?? (result.kind === 'success' ? 'stored' : 'error'),
@@ -707,7 +730,7 @@ export const refExportTool = defineTool({
     },
   },
   async execute(args, exec): Promise<RefExportToolResult> {
-    const session = exec.agent?.session as unknown as
+    const session = exec?.agent?.session as unknown as
       | { readonly header?: { readonly cwd?: string } }
       | undefined
     const cwd = workspaceOf(session)
@@ -993,13 +1016,21 @@ function mount(ctx: Context) {
             },
             handler: async (invocation) => {
               const raw = invocation.rawInput.trim()
-              if (raw === 'verify' || raw.startsWith('verify ') || raw.startsWith('verify\t')) {
-                return await runVerifyCommand(raw.slice('verify'.length), {
-                  verify: (claim: VerificationClaim) => verifyCandidate(claim, { cache: verifyCache }),
-                })
-              }
               const session = invocation.agent.session as unknown as SessionLike
               const cwd = workspaceOf(session)
+              const registryConfig = cwd === '' ? normalizeRegistrySettings({}) : await readRegistrySettings(cwd)
+              const verificationOptions = {
+                cache: verifyCache,
+                mailto: registryConfig.settings.mailto,
+                registryBaseUrls: registryConfig.settings.registryBaseUrls,
+                privateMode: registryConfig.settings.privateMode,
+              }
+              if (raw === 'verify' || raw.startsWith('verify ') || raw.startsWith('verify\t')) {
+                return await runVerifyCommand(raw.slice('verify'.length), {
+                  privateMode: registryConfig.settings.privateMode,
+                  verify: (claim: VerificationClaim) => verifyCandidate(claim, verificationOptions),
+                })
+              }
               // Route by the parsed subcommand rather than a hand-written prefix
               // list: `dir` (and any future subcommand) must reach the store
               // module instead of falling through to `runRefsCommand`, which
@@ -1009,7 +1040,7 @@ function mount(ctx: Context) {
                 if (cwd === '') {
                   return { kind: 'error', text: 'no workspace: the session has no cwd.' }
                 }
-                return await runStoreCommand(raw, storeDeps(cwd, invocation.signal))
+                return await runStoreCommand(raw, await storeDeps(cwd, invocation.signal))
               }
               let batchPersistenceFailure: string | undefined
               const result = await runRefsCommand(
@@ -1022,6 +1053,7 @@ function mount(ctx: Context) {
                   save: async (candidates, context) => {
                     const summary = await saveCaptured(candidates, {
                       resolveIdentifier: async (candidate) => {
+                        if (registryConfig.settings.privateMode) return undefined
                         const outcome = await verifyCandidate(
                           {
                             doi: candidate.doi,
@@ -1032,7 +1064,7 @@ function mount(ctx: Context) {
                             ...(candidate.isbn === undefined ? {} : { isbn: candidate.isbn }),
                             ...(candidate.url === undefined ? {} : { url: candidate.url }),
                           },
-                          { cache: verifyCache },
+                          verificationOptions,
                         )
                         const matched = outcome.records.find(
                           (record) => record.source === outcome.report.matchedSource && record.title.trim() !== '',
@@ -1040,7 +1072,7 @@ function mount(ctx: Context) {
                         return matched ?? outcome.records.find((record) => record.title.trim() !== '')
                       },
                       save: async (payload) => {
-                        const stored = await saveFromPayload(payload, storeDeps(cwd))
+                        const stored = await saveFromPayload(payload, await storeDeps(cwd))
                         return {
                           kind: stored.kind,
                           quarantined: stored.quarantined,

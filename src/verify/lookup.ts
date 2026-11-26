@@ -33,6 +33,7 @@ import type { BodyBasis } from './clients.ts'
 import { judgeCandidate } from './judge.ts'
 import { isValidIsbn10, isValidIsbn13 } from '../core/identifiers.ts'
 import type { Candidate } from '../core/candidates.ts'
+import type { RegistryBaseUrls } from '../core/registry-settings.ts'
 import type { SourceId, SourceRecord, VerificationReport } from './types.ts'
 
 /** Minimal response shape; `fetch` satisfies it. */
@@ -47,8 +48,11 @@ export type Fetcher = (url: string, init: { signal?: AbortSignal }) => Promise<H
 
 export interface LookupOptions {
   readonly fetcher?: Fetcher | undefined
-  /** Sent as `?mailto=` when non-empty; omitted entirely otherwise. */
+  /** Sent to registries that support it as `mailto` or `email`. */
   readonly mailto?: string | undefined
+  readonly registryBaseUrls?: Partial<RegistryBaseUrls> | undefined
+  /** Return an empty, not-verified result before tasks, cache reads, or fetches. */
+  readonly privateMode?: boolean | undefined
   readonly sourceTimeoutMs?: number | undefined
   readonly totalBudgetMs?: number | undefined
   readonly retries?: number | undefined
@@ -324,8 +328,10 @@ export interface LookupIdentity {
   readonly title?: string | undefined
 }
 
-function tasksFor(identity: LookupIdentity, mailto: string | undefined): SourceTask[] {
-  const contact = mailto === undefined ? undefined : { mailto }
+function tasksFor(identity: LookupIdentity, options: Pick<LookupOptions, 'mailto' | 'registryBaseUrls'>): SourceTask[] {
+  const contact = options.mailto === undefined && options.registryBaseUrls === undefined
+    ? undefined
+    : { mailto: options.mailto, registryBaseUrls: options.registryBaseUrls }
   const pmid = identity.pmid?.trim()
   const pmcid = identity.pmcid?.trim()
   const doi = identity.doi?.trim()
@@ -339,18 +345,18 @@ function tasksFor(identity: LookupIdentity, mailto: string | undefined): SourceT
   if (doi !== undefined && doi !== '') {
     return [
       { source: 'crossref', url: crossrefDoiUrl(doi, contact), basis: 'doi' },
-      { source: 'datacite', url: dataciteDoiUrl(doi), basis: 'doi' },
+      { source: 'datacite', url: dataciteDoiUrl(doi, contact), basis: 'doi' },
       { source: 'openalex', url: openalexDoiUrl(doi, contact), basis: 'doi' },
     ]
   }
   if (arxivId !== undefined && arxivId !== '') {
-    return [{ source: 'arxiv', url: arxivIdUrl(arxivId), basis: 'id' }]
+    return [{ source: 'arxiv', url: arxivIdUrl(arxivId, contact), basis: 'id' }]
   }
   if (hasPubMedId) {
-    return [{ source: 'pubmed', url: pubmedIdUrl(pmid), basis: 'id' }]
+    return [{ source: 'pubmed', url: pubmedIdUrl(pmid, contact), basis: 'id' }]
   }
   if (hasPmcId) {
-    return [{ source: 'pubmed', url: pmcSearchUrl(pmcid), basis: 'id', pmcid }]
+    return [{ source: 'pubmed', url: pmcSearchUrl(pmcid, contact), basis: 'id', pmcid }]
   }
   if (isbn !== undefined && (isValidIsbn10(isbn) || isValidIsbn13(isbn))) {
     return [{ source: 'openlibrary', url: openlibraryIsbnUrl(isbn, contact), basis: 'id' }]
@@ -362,7 +368,7 @@ function tasksFor(identity: LookupIdentity, mailto: string | undefined): SourceT
     return [
       { source: 'crossref', url: crossrefSearchUrl(title, 5, contact), basis: 'search' },
       { source: 'openalex', url: openalexSearchUrl(title, 5, contact), basis: 'search' },
-      { source: 'arxiv', url: arxivSearchUrl(title, 5), basis: 'search' },
+      { source: 'arxiv', url: arxivSearchUrl(title, 5, contact), basis: 'search' },
     ]
   }
   return []
@@ -376,7 +382,12 @@ function tasksFor(identity: LookupIdentity, mailto: string | undefined): SourceT
  * (⚠ region) rather than blocking the capture.
  */
 export async function lookupRecords(identity: LookupIdentity, options: LookupOptions = {}): Promise<LookupResult> {
-  const tasks = tasksFor(identity, options.mailto)
+  if (options.privateMode === true) return { records: [], errors: [], timedOut: false, answered: [] }
+
+  const contact = options.mailto === undefined && options.registryBaseUrls === undefined
+    ? undefined
+    : { mailto: options.mailto, registryBaseUrls: options.registryBaseUrls }
+  const tasks = tasksFor(identity, { mailto: options.mailto, registryBaseUrls: options.registryBaseUrls })
   if (tasks.length === 0) return { records: [], errors: [], timedOut: false, answered: [] }
 
   const fetcher = options.fetcher ?? defaultFetcher
@@ -413,12 +424,12 @@ export async function lookupRecords(identity: LookupIdentity, options: LookupOpt
         cache?.set(task.url, searchBody, now())
         if (uid === undefined) return { source: task.source, records: [] }
 
-        const pmcUrl = pmcSummaryUrl(uid)
+        const pmcUrl = pmcSummaryUrl(uid, contact)
         const pmcBody = await fetchText(pmcUrl, fetchOptions)
         const pmid = parsePmcSummaryPmid(pmcBody, uid)
         cache?.set(pmcUrl, pmcBody, now())
 
-        const pubmedUrl = pubmedIdUrl(pmid)
+        const pubmedUrl = pubmedIdUrl(pmid, contact)
         const pubmedBody = await fetchText(pubmedUrl, fetchOptions)
         const records = parsePubMedSummary(pubmedBody)
         cache?.set(pubmedUrl, pubmedBody, now())

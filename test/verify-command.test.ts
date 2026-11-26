@@ -110,6 +110,30 @@ describe('runVerifyCommand', () => {
     expect(parsed.records).toEqual([])
   })
 
+  it('discloses that private mode prevented registry verification in human and JSON output', async () => {
+    const privateOutcome = outcome({
+      ...verified,
+      status: 'unverified',
+      passed: 0,
+      matchedSource: undefined,
+      reasons: ['private-mode'],
+    })
+    const human = await runVerifyCommand('--doi=10.1000/xyz', {
+      privateMode: true,
+      verify: async () => privateOutcome,
+    })
+    expect(human.text).toContain('private mode prevented registry requests')
+    expect(human.text).toContain('not verified')
+
+    const json = await runVerifyCommand('--doi=10.1000/xyz --json', {
+      privateMode: true,
+      verify: async () => privateOutcome,
+    })
+    const parsed = JSON.parse(json.text) as { privateMode?: boolean; notice?: string }
+    expect(parsed.privateMode).toBe(true)
+    expect(parsed.notice).toContain('Private mode')
+  })
+
   it('never calls the network for a malformed command', async () => {
     let called = false
     const result = await runVerifyCommand('--nope', {

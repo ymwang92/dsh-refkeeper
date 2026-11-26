@@ -91,7 +91,11 @@ For host-independent citation helpers, import the pure API subpath: `import { ex
 
 ### Configuration
 
-No plugin-specific API key or registry configuration is required. Annotations use the model selected for the current session. The panel's **Export to** path is stored in `refs/settings.json` and must stay inside the session workspace; the library remains at `refs/refs.json`.
+Registry verification works with the built-in endpoints and needs no API key. In `refs/settings.json`, `registryBaseUrls` can override the base URLs for Crossref (`api.crossref.org`), DataCite (`api.datacite.org`), OpenAlex (`api.openalex.org`), arXiv (`export.arxiv.org`), PubMed (`eutils.ncbi.nlm.nih.gov`), and Open Library (`openlibrary.org`); its map keys are `crossref`, `datacite`, `openalex`, `arxiv`, `pubmed`, and `openlibrary`. The same file supports an optional `mailto` contact address for registry requests. The panel shows whether each endpoint is using its default or a custom URL. Only HTTP(S) endpoints are accepted; invalid values produce a warning, are ignored, and do not stop capture.
+
+Private mode is opt-in and is controlled by `privateMode` in `refs/settings.json`. When enabled, capture, `ref_verify`, `/refs verify`, re-verification, and non-manual promotion make **no registry requests**. Captured references are saved as manual entries and clearly marked **not verified**; use manual confirmation or promote with `--manual` when appropriate. Annotations still use the model selected for the current session.
+
+The panel's **Export to** path is stored in `refs/settings.json` and must stay inside the session workspace; the library remains at `refs/refs.json`.
 
 ## Use
 
@@ -101,6 +105,8 @@ No plugin-specific API key or registry configuration is required. Annotations us
 4. Choose BibTeX, RIS, or CSL-JSON, then **Export this capture**.
 
 When the scan budget truncates a capture, the command and panel say that the newest complete messages totaling N characters were kept and older content was omitted. The saved batch retains the truncation flag and scanned character count.
+
+CSL-JSON exports standard CSL bibliographic fields. Refkeeper verification status is not a CSL-JSON field, so the export does not distinguish verified references from manual entries; keep the annotated record if you need that status.
 
 The same steps as commands:
 
@@ -290,9 +296,9 @@ All plain JSON and Markdown, so they can be committed with the manuscript and di
 
 ## Data and privacy
 
-- Requests leave the machine only for verification: the identifier or title is sent to Crossref, OpenAlex, arXiv, DataCite and PubMed.
-- Annotations use the model already configured in the session; the plugin holds no API key of its own.
-- No telemetry. The library is a local file.
+- In the default mode, verification sends the identifier or title to the configured registry endpoints: Crossref, DataCite, OpenAlex, arXiv, PubMed, and Open Library. A configured `mailto` address is included in registry requests.
+- Private mode is opt-in and disables all registry traffic for capture, `ref_verify`, `/refs verify`, re-verification, and non-manual promotion. Capture still saves entries as manual and marks them **not verified**; manual confirmation or `--manual` promotion remains available. It does not claim those references were registry-checked.
+- Annotations use the model already configured in the session; the plugin holds no API key of its own. No telemetry. The library is a local file.
 
 ## Development
 
